@@ -22,12 +22,14 @@ A Telegram bot that automatically downloads media files from forwarded messages 
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd telegram_auto_download
 ```
 
 2. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -41,7 +43,7 @@ pip install -r requirements.txt
 ### Getting Telegram API Credentials
 
 1. **API ID and API Hash:**
-   - Go to https://my.telegram.org/apps
+   - Go to <https://my.telegram.org/apps>
    - Log in with your phone number
    - Create a new application
    - Copy the `api_id` and `api_hash`
@@ -68,6 +70,7 @@ BOT_TOKEN=your_bot_token_here
 ## Usage
 
 1. Start the bot:
+
 ```bash
 python src/telegram_bot.py
 ```
@@ -104,6 +107,7 @@ telegram_auto_download/
 ## Error Handling
 
 The bot includes comprehensive error handling for:
+
 - Invalid API credentials
 - Network connection issues
 - File download failures

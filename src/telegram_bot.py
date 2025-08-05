@@ -144,7 +144,7 @@ class TelegramMediaBot:
         message = update.message
         
         # 檢查是否為轉發訊息
-        if not message.forward_from_chat and not message.forward_from:
+        if not message.forward_origin:
             await message.reply_text(
                 "請轉發一則訊息給我，我會下載該訊息及其所有回覆中的媒體文件！\n\n"
                 "支援的媒體類型：照片、影片、GIF、音訊等"
@@ -156,14 +156,21 @@ class TelegramMediaBot:
         
         try:
             # 提取原訊息資訊
-            if message.forward_from_chat:
-                # 來自頻道或群組
-                chat_id = message.forward_from_chat.id
-                original_message_id = message.forward_from_message_id
-                chat_name = message.forward_from_chat.title or message.forward_from_chat.username
+            from telegram import MessageOriginChannel, MessageOriginUser, MessageOriginHiddenUser, MessageOriginChat
+            
+            if isinstance(message.forward_origin, MessageOriginChannel):
+                # 來自頻道
+                chat_id = message.forward_origin.chat.id
+                original_message_id = message.forward_origin.message_id
+                chat_name = message.forward_origin.chat.title or message.forward_origin.chat.username
+            elif isinstance(message.forward_origin, MessageOriginChat):
+                # 來自群組
+                chat_id = message.forward_origin.sender_chat.id
+                original_message_id = message.forward_origin.message_id
+                chat_name = message.forward_origin.sender_chat.title or message.forward_origin.sender_chat.username
             else:
-                # 來自私人聊天
-                await processing_msg.edit_text("❌ 暫不支援來自私人聊天的轉發訊息")
+                # 來自私人聊天或隱藏用戶
+                await processing_msg.edit_text("❌ 暫不支援來自私人聊天或隱藏用戶的轉發訊息")
                 return
             
             await processing_msg.edit_text(f"📡 正在獲取來自 {chat_name} 的訊息...")

@@ -12,7 +12,7 @@ import os
 
 # Add the project root and config directories to the Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config'))
+# sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config'))
 
 from config.config import validate_config, API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN
 from src.telegram_bot import TelegramMediaBot
