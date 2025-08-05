@@ -1,16 +1,16 @@
 # Telegram Auto Download Bot
 
-A Telegram bot that automatically downloads media files from forwarded messages and their replies, then packages them into a ZIP file for easy download.
+A Telegram bot that automatically downloads and backs up media files from forwarded messages and their replies to the server for permanent storage.
 
 ## Features
 
 - 🤖 Telegram bot interface for easy interaction
 - 📥 Downloads media from forwarded messages and all their replies
-- 📦 Automatically packages downloads into ZIP files
+- 💾 Permanently stores files on server for backup purposes
 - 🎯 Supports photos, videos, GIFs, audio files, and documents
 - 🔍 Smart file naming with timestamps and message IDs
-- 📊 Progress updates during download process
-- 🚫 File size validation (50MB Telegram limit)
+- 📊 Progress updates during backup process
+- 📁 Organized storage in timestamped directories
 
 ## Requirements
 
@@ -78,8 +78,8 @@ python main.py
 2. In Telegram:
    - Find your bot by username
    - Forward any message with media to the bot
-   - The bot will download all media from the message and its replies
-   - Receive a ZIP file with all downloaded content
+   - The bot will backup all media from the message
+   - Receive confirmation with backup details (file count, size, storage location)
 
 ## Project Structure
 
@@ -91,7 +91,7 @@ telegram_auto_download/
 │   └── config.py               # Configuration management
 ├── main.py                     # Main entry point
 ├── logs/                       # Log files (auto-created)
-├── downloads/                  # Temporary download directory
+├── downloads/                  # Permanent backup directory
 ├── requirements.txt            # Python dependencies
 ├── ChangeLog.md               # Project changelog
 └── README.md                  # This file
@@ -112,14 +112,14 @@ The bot includes comprehensive error handling for:
 - Invalid API credentials
 - Network connection issues
 - File download failures
-- ZIP creation problems
+- Storage directory creation
 - Telegram API rate limits
 
 ## Security Notes
 
 - Never commit your `.env` file or API credentials
 - Keep your bot token secure and private
-- The bot creates temporary files that are automatically cleaned up
+- Files are permanently stored in organized backup directories
 - All session files are ignored by git
 
 ## Troubleshooting
@@ -130,9 +130,9 @@ The bot includes comprehensive error handling for:
    - Ensure the bot has access to the forwarded chat
    - Check if the message is from a private chat (not supported)
 
-2. **"File too large"**
-   - Telegram bots have a 50MB upload limit
-   - Large files will be reported but not sent
+2. **"Storage issues"**
+   - Ensure sufficient disk space for media backups
+   - Check directory permissions for backup storage
 
 3. **Authentication errors**
    - Verify your API credentials in `.env`
@@ -156,4 +156,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Disclaimer
 
-This bot is for educational and personal use. Ensure you comply with Telegram's Terms of Service and respect copyright when downloading media files.
+This bot is for educational and personal backup use. Ensure you comply with Telegram's Terms of Service and respect copyright when backing up media files. Only backup content you have permission to store.

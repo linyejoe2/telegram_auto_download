@@ -5,9 +5,6 @@ from telethon import TelegramClient
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
-import zipfile
-import tempfile
-import shutil
 from datetime import datetime
 
 # 設定日誌
@@ -122,22 +119,6 @@ class TelegramMediaBot:
             logger.error(f"下載媒體時出錯: {e}")
             return []
     
-    async def create_zip_file(self, download_dir, zip_name):
-        """將下載的文件打包成 ZIP"""
-        try:
-            zip_path = os.path.join(os.path.dirname(download_dir), f"{zip_name}.zip")
-            
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(download_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, download_dir)
-                        zipf.write(file_path, arcname)
-            
-            return zip_path
-        except Exception as e:
-            logger.error(f"創建 ZIP 文件時出錯: {e}")
-            return None
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理收到的訊息"""
@@ -146,13 +127,13 @@ class TelegramMediaBot:
         # 檢查是否為轉發訊息
         if not message.forward_origin:
             await message.reply_text(
-                "請轉發一則訊息給我，我會下載該訊息及其所有回覆中的媒體文件！\n\n"
+                "請轉發一則訊息給我，我會備份該訊息及其所有回覆中的媒體文件到伺服器！\n\n"
                 "支援的媒體類型：照片、影片、GIF、音訊等"
             )
             return
         
         # 發送處理中訊息
-        processing_msg = await message.reply_text("🔄 正在處理中，請稍候...")
+        processing_msg = await message.reply_text("🔄 正在備份中，請稍候...")
         
         try:
             # 提取原訊息資訊
@@ -182,12 +163,11 @@ class TelegramMediaBot:
                 await processing_msg.edit_text("❌ 無法獲取原訊息，請確認 Bot 有權限訪問該聊天")
                 return
             
-            # 創建臨時下載目錄
+            # 創建下載目錄
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            temp_dir = tempfile.mkdtemp()
-            download_dir = os.path.join(temp_dir, f"message_{original_message_id}_{timestamp}")
+            download_dir = os.path.join('downloads', f"message_{original_message_id}_{timestamp}")
             
-            await processing_msg.edit_text("⬇️ 正在下載媒體文件...")
+            await processing_msg.edit_text("⬇️ 正在備份媒體文件...")
             
             all_downloaded_files = []
             
@@ -204,49 +184,27 @@ class TelegramMediaBot:
                 
                 # 更新進度
                 if (i + 1) % 5 == 0:
-                    await processing_msg.edit_text(f"⬇️ 正在下載媒體文件... ({i + 1}/{len(replies)} 回覆已處理)")
+                    await processing_msg.edit_text(f"⬇️ 正在備份媒體文件... ({i + 1}/{len(replies)} 回覆已處理)")
             
             if not all_downloaded_files:
                 await processing_msg.edit_text("ℹ️ 該訊息及其回覆中沒有找到任何媒體文件")
-                shutil.rmtree(temp_dir)
                 return
             
-            await processing_msg.edit_text("📦 正在打包文件...")
+            # 計算總文件大小
+            total_size = 0
+            for file_name in all_downloaded_files:
+                file_path = os.path.join(download_dir, file_name)
+                if os.path.exists(file_path):
+                    total_size += os.path.getsize(file_path)
             
-            # 創建 ZIP 文件
-            zip_name = f"telegram_media_{original_message_id}_{timestamp}"
-            zip_path = await self.create_zip_file(download_dir, zip_name)
-            
-            if zip_path and os.path.exists(zip_path):
-                # 檢查文件大小（Telegram Bot 限制 50MB）
-                file_size = os.path.getsize(zip_path)
-                if file_size > 50 * 1024 * 1024:  # 50MB
-                    await processing_msg.edit_text(
-                        f"⚠️ 文件太大 ({file_size / 1024 / 1024:.1f}MB)，超過 Telegram 限制 (50MB)\n"
-                        f"共下載了 {len(all_downloaded_files)} 個媒體文件"
-                    )
-                else:
-                    # 發送 ZIP 文件
-                    await processing_msg.edit_text("📤 正在上傳文件...")
-                    
-                    with open(zip_path, 'rb') as zip_file:
-                        await context.bot.send_document(
-                            chat_id=message.chat_id,
-                            document=zip_file,
-                            filename=f"{zip_name}.zip",
-                            caption=f"✅ 下載完成！\n"
-                                   f"原訊息 ID: {original_message_id}\n"
-                                   f"來源: {chat_name}\n"
-                                   f"共 {len(all_downloaded_files)} 個媒體文件\n"
-                                   f"文件大小: {file_size / 1024 / 1024:.1f}MB"
-                        )
-                    
-                    await processing_msg.delete()
-            else:
-                await processing_msg.edit_text("❌ 創建打包文件時出錯")
-            
-            # 清理臨時文件
-            shutil.rmtree(temp_dir)
+            await processing_msg.edit_text(
+                f"✅ 備份完成！\n"
+                f"原訊息 ID: {original_message_id}\n"
+                f"來源: {chat_name}\n"
+                f"共下載 {len(all_downloaded_files)} 個媒體文件\n"
+                f"總大小: {total_size / 1024 / 1024:.1f}MB\n"
+                f"儲存位置: {download_dir}"
+            )
             
         except Exception as e:
             logger.error(f"處理訊息時出錯: {e}")

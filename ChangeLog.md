@@ -1,6 +1,22 @@
 # ChangeLog
 
-## 0.1.1 Documentation Fix
+## 0.2.0.0805-1015 Backup Mode Implementation
+
+### feature
+
++ Convert bot to backup-only mode
+  + Remove ZIP file creation functionality
+  + Remove file upload/sending to users
+  + Files now permanently stored on server in organized directories
+  + Added backup completion summary with file count, total size, and storage location
+  + Updated progress messages to reflect backup operations instead of download/upload
+
+### docs
+
++ Update README.md to reflect backup-only functionality
++ Update CLAUDE.md documentation for new backup workflow
+
+## 0.1.1.0805-1632 Documentation Fix
 
 ### fix
 
