@@ -35,7 +35,7 @@ pip install -r requirements.txt
 ```
 
 3. Set up configuration:
-   - Copy `.env.example` to `.env`
+   - Create a `.env` file in the project root
    - Fill in your Telegram API credentials
 
 ## Configuration
@@ -72,7 +72,7 @@ BOT_TOKEN=your_bot_token_here
 1. Start the bot:
 
 ```bash
-python src/telegram_bot.py
+python main.py
 ```
 
 2. In Telegram:
@@ -88,11 +88,12 @@ telegram_auto_download/
 ├── src/
 │   └── telegram_bot.py          # Main bot application
 ├── config/
-│   └── .env.example            # Environment variables template
+│   └── config.py               # Configuration management
+├── main.py                     # Main entry point
 ├── logs/                       # Log files (auto-created)
 ├── downloads/                  # Temporary download directory
 ├── requirements.txt            # Python dependencies
-├── .gitignore                 # Git ignore rules
+├── ChangeLog.md               # Project changelog
 └── README.md                  # This file
 ```
 
