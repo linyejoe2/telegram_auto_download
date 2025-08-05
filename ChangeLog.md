@@ -1,8 +1,18 @@
 # ChangeLog
 
+## 0.1.1 Documentation Fix
+
+### fix
+
++ Fix README.md incorrect parts
+  + Update entry point from `python src/telegram_bot.py` to `python main.py`
+  + Update project structure to reflect actual files (config.py, main.py, ChangeLog.md)
+  + Remove reference to non-existent .env.example file in setup instructions
+
 ## 0.1.0.0805-1200 Initial Release
 
 ### feature
+
 + Add src/telegram_bot.py - TelegramBot class
   + Core bot functionality for handling Telegram messages
   + Media download support for photos, videos, GIFs, audio, and documents
@@ -34,6 +44,7 @@
   + Standard Python ignore patterns
 
 ### docs
+
 + Add README.md - comprehensive project documentation
   + Setup and installation instructions
   + Environment configuration guide
@@ -42,6 +53,7 @@
   + Troubleshooting section
 
 ### misc
+
 + Add downloads/ directory - media storage location
 + Add logs/ directory - application logging storage
 + Initialize project structure with proper directory organization
