@@ -1,5 +1,37 @@
 # ChangeLog
 
+## 0.2.1.0806-1155 Enhanced Download Reliability
+
+### feature
+
++ Add retry mechanism for media downloads
+  + Implement `download_media_with_retry()` with exponential backoff
+  + Support up to 3 retry attempts for failed downloads
+  + Handle network errors, timeouts, and Telegram API errors gracefully
+  + Add FloodWaitError handling to respect rate limits
+
++ Add progress tracking and persistence
+  + Implement `save_progress()` and `load_progress()` for download state management
+  + Save progress every 10 processed messages to prevent data loss
+  + Track completed and failed files separately
+  + Resume functionality for interrupted downloads
+
++ Enhanced error handling and logging
+  + Improved error messages for better user feedback
+  + Detailed logging for debugging download issues
+  + Separate handling for different types of Telegram API errors
+  + More informative error messages when message retrieval fails
+
++ Improved download reporting
+  + Show count of both successful and failed downloads
+  + Display detailed completion status in final message
+  + Better progress updates during bulk downloads
+
+### misc
+
++ Add required imports: time, json modules
++ Add error classes: FloodWaitError, RPCError from telethon.errors
+
 ## 0.2.0.0805-1015 Backup Mode Implementation
 
 ### feature
