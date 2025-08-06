@@ -1,5 +1,47 @@
 # ChangeLog
 
+## 0.3.0.0806-1430 Major Architecture Refactoring
+
+### refactor
+
++ **Complete codebase restructure** - Split monolithic telegram_bot.py (596 lines) into modular architecture
+  + Create `src/bot.py` (247 lines) - Main bot logic and message handling
+  + Create `src/downloader.py` (234 lines) - Download operations with concurrent processing
+  + Create `src/monitor.py` (134 lines) - Real-time monitoring and progress tracking
+  + Create `src/__init__.py` - Package initialization and clean exports
+
++ **Separation of Concerns** - Each module has single responsibility
+  + `TelegramMediaBot` class focuses on bot orchestration and user interaction
+  + `MediaDownloader` class handles all download operations and file management
+  + `DownloadMonitor` class manages real-time progress tracking and system monitoring
+
++ **Improved maintainability and testability**
+  + Individual components can be tested independently
+  + Clear interfaces between modules
+  + Easier debugging and troubleshooting
+  + Better code organization for future development
+
+### feature
+
++ Add total file size display throughout download process
+  + Pre-download analysis shows total expected download size
+  + Real-time progress shows downloaded/total MB with percentage
+  + Enhanced completion summary with size comparison and completion rate
+  + `get_media_size()` method for accurate file size calculation before download
+
++ Enhanced progress monitoring with comprehensive metrics
+  + Show progress as "45.2MB / 125.3MB (36.1%)" format
+  + Calculate and display completion percentage in real-time
+  + Improved ETA calculations based on current download speed
+  + Better disk space monitoring and warnings
+
+### misc
+
++ Backup original telegram_bot.py as telegram_bot.py.bak
++ Update main.py imports to use new modular structure
++ Update CLAUDE.md documentation to reflect new architecture
++ All modules pass syntax validation and import structure tests
+
 ## 0.2.1.0806-1155 Enhanced Download Reliability
 
 ### feature

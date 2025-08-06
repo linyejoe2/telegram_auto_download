@@ -1,0 +1,596 @@
+import asyncio
+import os
+import logging
+import time
+import json
+import threading
+import shutil
+from concurrent.futures import ThreadPoolExecutor
+from telethon import TelegramClient
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
+from telethon.errors import FloodWaitError, RPCError
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from datetime import datetime
+
+# 設定日誌
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# 減少第三方庫的詳細日誌
+logging.getLogger('httpx').setLevel(logging.WARNING)
+# logging.getLogger('telegram').setLevel(logging.WARNING)
+# logging.getLogger('telethon').setLevel(logging.WARNING)
+logging.getLogger('telethon.client.updates').setLevel(logging.WARNING)
+# logging.getLogger('urllib3').setLevel(logging.WARNING)
+# logging.getLogger('asyncio').setLevel(logging.WARNING)
+
+# Configuration will be passed from main.py or config module
+
+class TelegramMediaBot:
+    def __init__(self, api_id, api_hash, phone_number, bot_token):
+        # Telegram Client (用於訪問 API) - 優化連接設定
+        self.client = TelegramClient(
+            'bot_session', 
+            api_id, 
+            api_hash,
+            connection_retries=3,
+            retry_delay=1,
+            auto_reconnect=True,
+            timeout=30
+        )
+        
+        # Save main event loop
+        self.loop = asyncio.get_event_loop()
+        
+        # 併發控制
+        self.max_concurrent_downloads = 5
+        self.download_semaphore = asyncio.Semaphore(self.max_concurrent_downloads)
+        
+        # 監控變量
+        self.download_stats = {
+            'total_files': 0,
+            'completed_files': 0,
+            'failed_files': 0,
+            'total_size': 0,
+            'downloaded_size': 0,
+            'start_time': None
+        }
+        self.monitoring_active = False
+        self.current_download_dir = None
+        self.phone_number = phone_number
+        self.bot_token = bot_token
+        
+        # Bot Application
+        self.app = Application.builder().token(bot_token).build()
+        
+        # 設定處理器
+        self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
+    
+    async def start_client(self):
+        """啟動 Telegram Client"""
+        await self.client.start(phone=self.phone_number)
+        logger.info("Telegram Client 已啟動")
+    
+    async def get_message_and_replies(self, chat_id, message_id):
+        """獲取指定訊息及其所有回覆"""
+        try:
+            logger.info(f"正在獲取 chat_id={chat_id}, message_id={message_id} 的訊息")
+            
+            # 獲取聊天實體
+            try:
+                chat = await self.client.get_entity(chat_id)
+                logger.info(f"成功獲取聊天實體: {chat.title if hasattr(chat, 'title') else chat}")
+            except Exception as entity_error:
+                logger.error(f"無法獲取聊天實體 {chat_id}: {entity_error}")
+                return None, []
+            
+            # 獲取原始訊息
+            try:
+                original_message = await self.client.get_messages(chat, ids=message_id)
+                if not original_message:
+                    logger.warning(f"未找到訊息 ID {message_id}")
+                    return None, []
+                logger.info(f"成功獲取原始訊息 ID {message_id}")
+            except Exception as msg_error:
+                logger.error(f"無法獲取訊息 {message_id}: {msg_error}")
+                return None, []
+            
+            # 獲取所有回覆 - 使用更安全的方法
+            replies = []
+            try:
+                async for reply in self.client.iter_messages(chat, reply_to=message_id):
+                    replies.append(reply)
+                logger.info(f"成功獲取 {len(replies)} 則回覆")
+            except Exception as reply_error:
+                logger.warning(f"獲取回覆時出錯，但會繼續處理原訊息: {reply_error}")
+                # 即使獲取回覆失敗，也返回原訊息
+            
+            logger.info(f"找到原訊息和 {len(replies)} 則回覆")
+            return original_message, replies
+            
+        except RPCError as rpc_error:
+            logger.error(f"Telegram API 錯誤: {rpc_error}")
+            return None, []
+        except Exception as e:
+            logger.error(f"獲取訊息時發生未預期錯誤: {e}")
+            return None, []
+    
+    async def download_media_with_retry(self, message, file_path, max_retries=3):
+        """下載媒體文件，包含重試機制和進度追蹤"""
+        async with self.download_semaphore:  # 控制併發數量
+            for attempt in range(max_retries):
+                try:
+                    # 初始化進度統計
+                    if hasattr(self, 'download_stats'):
+                        self.download_stats['start_time'] = time.time()
+                        self.download_stats['_last_progress'] = 0  # 用於追蹤進度差
+                        
+                    # 使用進度回調來追蹤下載進度
+                    def progress_callback(current, total):
+                        if hasattr(self, 'download_stats'):
+                            # 更新已下載大小（粗略估算）
+                            downloaded = current - self.download_stats.get('_last_progress', 0)
+                            self.download_stats['downloaded_size'] += max(downloaded, 0)
+                            self.download_stats['_last_progress'] = current
+                    
+                    await self.client.download_media(
+                        message, 
+                        file_path,
+                        progress_callback=progress_callback
+                    )
+                    
+                    # 更新統計
+                    if os.path.exists(file_path):
+                        file_size = os.path.getsize(file_path)
+                        # self.download_stats['downloaded_size'] += file_size
+                        self.download_stats['completed_files'] += 1
+                    
+                    return True
+                    
+                except (ConnectionError, OSError, asyncio.TimeoutError, RPCError) as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"下載失敗，已嘗試 {max_retries} 次: {e}")
+                        self.download_stats['failed_files'] += 1
+                        return False
+                    
+                    wait_time = (2 ** attempt) + 1  # 指數退避：2, 3, 5 秒
+                    logger.warning(f"下載失敗 (嘗試 {attempt + 1}/{max_retries})，{wait_time} 秒後重試: {e}")
+                    await asyncio.sleep(wait_time)
+                    
+                except FloodWaitError as e:
+                    logger.warning(f"觸發限流，等待 {e.seconds} 秒")
+                    await asyncio.sleep(e.seconds)
+                    
+                except Exception as e:
+                    logger.error(f"下載時發生未知錯誤: {e}")
+                    self.download_stats['failed_files'] += 1
+                    return False
+        
+        return False
+
+    def start_monitoring_thread(self, download_dir, processing_msg):
+        """啟動監控線程"""
+        self.current_download_dir = download_dir
+        self.monitoring_active = True
+        
+        def monitor_downloads():
+            """監控下載進度和磁碟空間"""
+            last_update = time.time()
+            
+            while self.monitoring_active:
+                try:
+                    current_time = time.time()
+                    
+                    # 每5秒更新一次
+                    if current_time - last_update >= 5:
+                        # 獲取磁碟空間資訊
+                        if self.current_download_dir and os.path.exists(self.current_download_dir):
+                            total, used, free = shutil.disk_usage(self.current_download_dir)
+                            free_gb = free / (1024**3)
+                            
+                            # 計算下載速度
+                            elapsed = current_time - (self.download_stats.get('start_time', current_time))
+                            if elapsed > 0:
+                                speed_mbps = (self.download_stats['downloaded_size'] / (1024**2)) / elapsed
+                            else:
+                                speed_mbps = 0
+                            
+                            # 計算下載進度百分比
+                            if self.download_stats['total_size'] > 0:
+                                progress_percent = (self.download_stats['downloaded_size'] / self.download_stats['total_size']) * 100
+                            else:
+                                progress_percent = 0
+                            
+                            # 構建狀態訊息
+                            status_msg = (
+                                f"⬇️ 備份進行中...\n"
+                                f"已完成: {self.download_stats['completed_files']}/{self.download_stats['total_files']} 個文件\n"
+                                f"失敗: {self.download_stats['failed_files']} 個\n"
+                                f"進度: {self.download_stats['downloaded_size']/(1024**2):.1f}MB / {self.download_stats['total_size']/(1024**2):.1f}MB ({progress_percent:.1f}%)\n"
+                                f"速度: {speed_mbps:.1f}MB/s\n"
+                                f"剩餘空間: {free_gb:.1f}GB"
+                            )
+                            
+                            # 異步更新消息
+                            asyncio.run_coroutine_threadsafe(
+                                self.safe_update_message(processing_msg, status_msg),
+                                self.loop
+                            )
+                            
+                            # 記錄詳細日誌
+                            logger.info(
+                                f"下載狀態 - 完成: {self.download_stats['completed_files']}, "
+                                f"失敗: {self.download_stats['failed_files']}, "
+                                f"速度: {speed_mbps:.1f}MB/s, "
+                                f"剩餘空間: {free_gb:.1f}GB"
+                            )
+                            
+                            last_update = current_time
+                    
+                    time.sleep(1)  # 每秒檢查一次
+                    
+                except Exception as e:
+                    logger.error(f"監控線程錯誤: {e}")
+                    time.sleep(5)
+        
+        # 在後台線程中運行監控
+        monitor_thread = threading.Thread(target=monitor_downloads, daemon=True)
+        monitor_thread.start()
+        logger.info("監控線程已啟動")
+
+    async def safe_update_message(self, processing_msg, text):
+        """安全地更新消息，避免阻塞"""
+        try:
+            await processing_msg.edit_text(text)
+        except Exception as e:
+            # 忽略消息更新錯誤，不影響下載進程
+            logger.debug(f"消息更新失敗: {e}")
+
+    def stop_monitoring(self):
+        """停止監控線程"""
+        self.monitoring_active = False
+        logger.info("監控線程已停止")
+
+    async def get_media_size(self, message):
+        """獲取媒體文件大小"""
+        try:
+            if not message.media:
+                return 0
+            
+            if isinstance(message.media, MessageMediaPhoto):
+                # 照片大小通常較小，使用預估值
+                return message.media.photo.sizes[-1].size if hasattr(message.media.photo, 'sizes') else 500000  # 預估500KB
+            
+            elif isinstance(message.media, MessageMediaDocument):
+                return message.media.document.size
+                
+        except Exception as e:
+            logger.debug(f"獲取媒體大小時出錯: {e}")
+            return 0
+        
+        return 0
+
+    async def download_multiple_messages_concurrent(self, messages, download_dir):
+        """並發下載多個消息的媒體文件"""
+        if not messages:
+            return []
+        
+        # 統計總文件數和總大小
+        total_media_count = sum(1 for msg in messages if msg.media)
+        self.download_stats['total_files'] = total_media_count
+        
+        # 計算總文件大小
+        total_size = 0
+        for message in messages:
+            if message.media:
+                size = await self.get_media_size(message)
+                total_size += size
+        
+        self.download_stats['total_size'] = total_size
+        
+        if total_media_count == 0:
+            return []
+        
+        logger.info(f"開始並發下載 {total_media_count} 個媒體文件，總大小: {total_size/(1024**2):.1f}MB")
+        
+        # 創建下載任務
+        download_tasks = []
+        for message in messages:
+            if message.media:
+                task = self.download_media_from_message(message, download_dir)
+                download_tasks.append(task)
+        
+        # 並發執行所有下載任務
+        try:
+            results = await asyncio.gather(*download_tasks, return_exceptions=True)
+            
+            # 合併結果
+            all_files = []
+            for result in results:
+                if isinstance(result, list):
+                    all_files.extend(result)
+                elif isinstance(result, Exception):
+                    logger.error(f"下載任務異常: {result}")
+                    self.download_stats['failed_files'] += 1
+            
+            return all_files
+            
+        except Exception as e:
+            logger.error(f"下載出錯: {e}")
+            return []
+
+    def save_progress(self, download_dir, progress_data):
+        """保存下載進度"""
+        progress_file = os.path.join(download_dir, '.download_progress.json')
+        try:
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"無法保存進度: {e}")
+
+    def load_progress(self, download_dir):
+        """載入下載進度"""
+        progress_file = os.path.join(download_dir, '.download_progress.json')
+        try:
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"無法載入進度: {e}")
+        return {"completed_files": [], "failed_files": []}
+
+    async def download_media_from_message(self, message, download_dir):
+        """從訊息中下載媒體文件"""
+        if not message.media:
+            return []
+        
+        try:
+            os.makedirs(download_dir, exist_ok=True)
+            downloaded_files = []
+            
+            # 處理照片
+            if isinstance(message.media, MessageMediaPhoto):
+                file_name = f"photo_{message.id}_{message.date.strftime('%Y%m%d_%H%M%S')}.jpg"
+                file_path = os.path.join(download_dir, file_name)
+                
+                if await self.download_media_with_retry(message, file_path):
+                    downloaded_files.append(file_name)
+                    logger.info(f"下載照片: {file_name}")
+                else:
+                    logger.error(f"照片下載失敗: {file_name}")
+                
+            # 處理文檔（影片、GIF等）
+            elif isinstance(message.media, MessageMediaDocument):
+                document = message.media.document
+                
+                # 獲取文件副檔名
+                file_extension = ""
+                original_name = ""
+                
+                for attr in document.attributes:
+                    if hasattr(attr, 'file_name') and attr.file_name:
+                        original_name = attr.file_name
+                        file_extension = os.path.splitext(attr.file_name)[1]
+                        break
+                
+                # 如果沒有副檔名，根據 MIME 類型推斷
+                if not file_extension:
+                    mime_type = document.mime_type
+                    if mime_type.startswith('video/'):
+                        file_extension = '.mp4'
+                    elif mime_type.startswith('image/'):
+                        file_extension = '.gif' if 'gif' in mime_type else '.jpg'
+                    elif mime_type.startswith('audio/'):
+                        file_extension = '.mp3'
+                    else:
+                        file_extension = '.bin'
+                
+                # 使用原檔名或生成新檔名
+                if original_name:
+                    file_name = f"{message.id}_{original_name}"
+                else:
+                    file_name = f"document_{message.id}_{message.date.strftime('%Y%m%d_%H%M%S')}{file_extension}"
+                
+                file_path = os.path.join(download_dir, file_name)
+                
+                if await self.download_media_with_retry(message, file_path):
+                    downloaded_files.append(file_name)
+                    logger.info(f"下載文檔: {file_name}")
+                else:
+                    logger.error(f"文檔下載失敗: {file_name}")
+            
+            return downloaded_files
+            
+        except Exception as e:
+            logger.error(f"下載媒體時出錯: {e}")
+            return []
+    
+    
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理收到的訊息"""
+        message = update.message
+        
+        # 檢查是否為轉發訊息
+        if not message.forward_origin:
+            await message.reply_text(
+                "請轉發一則訊息給我，我會備份該訊息及其所有回覆中的媒體文件到伺服器！\n\n"
+                "支援的媒體類型：照片、影片、GIF、音訊等"
+            )
+            return
+        
+        # 發送處理中訊息
+        processing_msg = await message.reply_text("🔄 正在備份中，請稍候...")
+        
+        try:
+            # 提取原訊息資訊
+            from telegram import MessageOriginChannel, MessageOriginUser, MessageOriginHiddenUser, MessageOriginChat
+            
+            if isinstance(message.forward_origin, MessageOriginChannel):
+                # 來自頻道
+                chat_id = message.forward_origin.chat.id
+                original_message_id = message.forward_origin.message_id
+                chat_name = message.forward_origin.chat.title or message.forward_origin.chat.username
+            elif isinstance(message.forward_origin, MessageOriginChat):
+                # 來自群組
+                chat_id = message.forward_origin.sender_chat.id
+                original_message_id = message.forward_origin.message_id
+                chat_name = message.forward_origin.sender_chat.title or message.forward_origin.sender_chat.username
+            else:
+                # 來自私人聊天或隱藏用戶
+                await processing_msg.edit_text("❌ 暫不支援來自私人聊天或隱藏用戶的轉發訊息")
+                return
+            
+            await processing_msg.edit_text(f"📡 正在獲取來自 {chat_name} 的訊息...")
+            
+            # 獲取原訊息和回覆
+            original_message, replies = await self.get_message_and_replies(chat_id, original_message_id)
+            
+            if not original_message:
+                error_msg = (
+                    "❌ 無法獲取原訊息\n\n"
+                    "可能的原因：\n"
+                    "• Bot 沒有權限訪問該頻道/群組\n"
+                    "• 訊息已被刪除\n"
+                    "• 訊息 ID 無效\n\n"
+                    "請確認 Bot 是該頻道/群組的成員"
+                )
+                await processing_msg.edit_text(error_msg)
+                return
+            
+            # 創建下載目錄
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            download_dir = os.path.join('downloads', f"message_{original_message_id}_{timestamp}")
+            os.makedirs(download_dir, exist_ok=True)
+            
+            # 初始化下載統計
+            self.download_stats = {
+                'total_files': 0,
+                'completed_files': 0,
+                'failed_files': 0,
+                'total_size': 0,
+                'downloaded_size': 0,
+                'start_time': time.time()
+            }
+            
+            # 啟動監控線程
+            self.start_monitoring_thread(download_dir, processing_msg)
+            
+            try:
+                await processing_msg.edit_text("📊 正在分析媒體文件...")
+                
+                # 準備所有需要下載的消息
+                messages_to_download = []
+                if original_message.media:
+                    messages_to_download.append(original_message)
+                
+                for reply in replies:
+                    if reply.media:
+                        messages_to_download.append(reply)
+                
+                if not messages_to_download:
+                    await processing_msg.edit_text("ℹ️ 該訊息及其回覆中沒有找到任何媒體文件")
+                    return
+                
+                # 計算總文件大小以顯示在初始訊息中
+                total_size_mb = self.download_stats['total_size'] / (1024**2)
+                await processing_msg.edit_text(f"🚀 開始下載 {len(messages_to_download)} 個媒體文件，總大小: {total_size_mb:.1f}MB...")
+                
+                # 使用並發下載
+                all_downloaded_files = await self.download_multiple_messages_concurrent(
+                    messages_to_download, download_dir
+                )
+                
+            finally:
+                # 停止監控線程
+                self.stop_monitoring()
+            
+            # 計算下載時間和速度
+            elapsed_time = time.time() - self.download_stats['start_time']
+            avg_speed = (self.download_stats['downloaded_size'] / (1024**2)) / max(elapsed_time, 1)
+            
+            # 獲取最終磁碟空間
+            if os.path.exists(download_dir):
+                total, used, free = shutil.disk_usage(download_dir)
+                free_gb = free / (1024**3)
+            else:
+                free_gb = 0
+            
+            # 建立結果訊息
+            result_msg = f"✅ 下載完成！\n"
+            result_msg += f"原訊息 ID: {original_message_id}\n"
+            result_msg += f"來源: {chat_name}\n"
+            result_msg += f"成功下載: {self.download_stats['completed_files']} 個媒體文件\n"
+            
+            if self.download_stats['failed_files'] > 0:
+                result_msg += f"失敗: {self.download_stats['failed_files']} 個文件\n"
+            
+            # 顯示下載大小和預期大小的對比
+            if self.download_stats['total_size'] > 0:
+                completion_rate = (self.download_stats['downloaded_size'] / self.download_stats['total_size']) * 100
+                result_msg += f"下載大小: {self.download_stats['downloaded_size']/(1024**2):.1f}MB / {self.download_stats['total_size']/(1024**2):.1f}MB ({completion_rate:.1f}%)\n"
+            else:
+                result_msg += f"下載大小: {self.download_stats['downloaded_size']/(1024**2):.1f}MB\n"
+            
+            result_msg += f"平均速度: {avg_speed:.1f}MB/s\n"
+            result_msg += f"耗時: {elapsed_time:.1f}秒\n"
+            result_msg += f"剩餘空間: {free_gb:.1f}GB\n"
+            result_msg += f"儲存位置: {download_dir}"
+            
+            await processing_msg.edit_text(result_msg)
+            
+            # 記錄完成日誌
+            logger.info(
+                f"下載完成 - 成功: {self.download_stats['completed_files']}, "
+                f"失敗: {self.download_stats['failed_files']}, "
+                f"總大小: {self.download_stats['downloaded_size']/(1024**2):.1f}MB, "
+                f"速度: {avg_speed:.1f}MB/s"
+            )
+            
+        except Exception as e:
+            logger.error(f"處理訊息時出錯: {e}")
+            await processing_msg.edit_text(f"❌ 處理時出錯: {str(e)}")
+    
+    async def run(self):
+        """啟動 Bot"""
+        try:
+            # 啟動 Telegram Client
+            await self.start_client()
+            
+            # 啟動 Bot
+            logger.info("正在啟動 Telegram Bot...")
+            await self.app.initialize()
+            await self.app.start()
+            
+            logger.info("Bot 已啟動！可以開始轉發訊息了")
+            
+            # 保持運行
+            await self.app.updater.start_polling()
+            
+            # 等待直到被停止
+            while True:
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            logger.error(f"Bot 運行出錯: {e}")
+        finally:
+            # 清理
+            await self.app.stop()
+            await self.app.shutdown()
+            await self.client.disconnect()
+
+# 創建 Bot 實例並運行
+async def main():
+    bot = TelegramMediaBot(API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN)
+    await bot.run()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot 已停止")
+    except Exception as e:
+        logger.error(f"程式出錯: {e}")

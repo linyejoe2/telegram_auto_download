@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config'))
 
 from config.config import validate_config, API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN
-from src.telegram_bot import TelegramMediaBot
+from src.bot import TelegramMediaBot
 
 async def main():
     """Main function to run the Telegram bot."""
