@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v0.3.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. The bot uses both the Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) to access different functionality, with enhanced media group detection and processing capabilities.
+This is a Telegram bot (v0.4.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes, with integrated SQLite database for download history and duplicate prevention. The bot uses both the Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) to access different functionality, with enhanced media group detection and processing capabilities.
 
 ## Development Commands
 
@@ -28,6 +28,7 @@ pip install -r requirements.txt
 - **src/bot.py**: Main bot logic and message handling (`TelegramMediaBot` class)
 - **src/downloader.py**: Media download operations with concurrent processing (`MediaDownloader` class)
 - **src/monitor.py**: Real-time monitoring and progress tracking (`DownloadMonitor` class)
+- **src/database.py**: SQLite database management for download history and metadata (v0.4.0)
 - **config/config.py**: Configuration management using environment variables from `.env` file
 
 ### Key Architecture Patterns
@@ -48,12 +49,14 @@ pip install -r requirements.txt
 ### Data Flow
 
 1. User forwards a message or media group to the bot
-2. Bot detects if message has `media_group_id` and collects all grouped messages (v0.3.1)
+2. Bot detects if message has `media_group_id` and collects all grouped messages
 3. Bot extracts original chat and message information from forward metadata
-4. Uses Telethon client to access the original message, media groups, and all replies
-5. Downloads all media files concurrently using `MediaDownloader` 
-6. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
-7. Provides completion summary with performance metrics and storage location
+4. Database checks for existing downloads to prevent duplicates (v0.4.0)
+5. Uses Telethon client to access the original message, media groups, and all replies
+6. Downloads all media files concurrently using `MediaDownloader` 
+7. Database records download metadata and file information (v0.4.0)
+8. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
+9. Provides completion summary with performance metrics and storage location
 
 ### Key Classes and Methods
 
@@ -97,15 +100,17 @@ The bot requires these environment variables in `.env`:
 telegram_auto_download/
 ├── src/
 │   ├── __init__.py              # Package initialization and exports
-│   ├── bot.py                   # Main bot logic with media group support (420+ lines) (v0.3.1)
+│   ├── bot.py                   # Main bot logic with media group support (420+ lines)
 │   ├── downloader.py           # Download operations with concurrency (234 lines)
 │   ├── monitor.py              # Real-time monitoring and progress (134 lines)
+│   ├── database.py             # SQLite database management and operations (v0.4.0)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)
 ├── config/
 │   └── config.py               # Configuration management
 ├── main.py                     # Application entry point
 ├── downloads/                  # Permanent backup directory (auto-created)
 ├── logs/                       # Log files directory (auto-created)
+├── downloads.db                # SQLite database for download history (v0.4.0)
 └── bot_session.session         # Telethon session file (auto-generated)
 ```
 
@@ -141,10 +146,12 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 
 ### Bot Capabilities
 - Bot supports forwarded messages from channels and group chats only (not private chats)
-- **Media Group Detection**: Automatically detects and processes grouped media (albums) as single units (v0.3.1)
+- **Media Group Detection**: Automatically detects and processes grouped media (albums) as single units
+- **Database Integration**: SQLite database tracks all downloads and prevents duplicates (v0.4.0)
 - Concurrent processing: Downloads up to 5 media files simultaneously for faster performance
 - Files are permanently stored in organized directories (by message ID and timestamp)
-- **Smart Directory Structure**: Media groups stored in `mediagroup_{id}_{timestamp}` directories (v0.3.1)
+- **Smart Directory Structure**: Media groups stored in `mediagroup_{id}_{timestamp}` directories
+- **Duplicate Prevention**: Database-driven checks prevent re-downloading existing files (v0.4.0)
 - Smart file naming includes message ID and timestamp
 
 ### User Experience Features
@@ -158,14 +165,16 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 
 ### Technical Implementation
 - **Modular Design**: Refactored from monolithic 596-line file into 3 specialized modules
-- **Media Group Architecture**: Intelligent collection and processing of grouped media (v0.3.1)
+- **Media Group Architecture**: Intelligent collection and processing of grouped media
+- **Database Architecture**: SQLite integration for persistent download tracking and metadata (v0.4.0)
 - **Asyncio-based Architecture**: Concurrent processing for maximum performance
 - **Semaphore Control**: Configurable download concurrency (`max_concurrent_downloads = 5`)
 - **Background Monitoring**: Separate thread for real-time statistics without blocking downloads
 - **Progress Persistence**: JSON-based progress tracking for resume capability
 - **Optimized Client**: Telethon client with connection pooling and retry logic
 - **Clean Separation**: Bot orchestration, download operations, and monitoring are decoupled
-- **Dual API Integration**: Smart handling of Bot API and Telethon API differences (v0.3.1)
+- **Dual API Integration**: Smart handling of Bot API and Telethon API differences
+- **Database Integration**: Comprehensive download history and duplicate detection system (v0.4.0)
 - **Logging**: Configured for debugging (INFO level) with reduced third-party verbosity
 
 ### Performance Improvements

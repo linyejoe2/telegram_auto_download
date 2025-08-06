@@ -1,5 +1,28 @@
 # ChangeLog
 
+## 0.4.0.0806-2329 Database Integration and Enhanced Management
+
+### feature
+
++ **SQLite Database Integration** - Persistent storage for download history and metadata
+  + Track all downloads with detailed metadata (message ID, file names, sizes, dates)
+  + Duplicate detection to prevent re-downloading existing files
+  + Download history queries and statistics
+  + Automated database initialization and schema management
+
++ **Enhanced Download Management** - Improved file organization and tracking
+  + Smart duplicate prevention using database lookups
+  + Comprehensive download statistics and reporting
+  + Better error tracking and recovery mechanisms
+  + Enhanced logging with database integration
+
+### improve
+
++ Database-driven architecture provides better scalability and data persistence
++ Improved performance through intelligent duplicate detection
++ Enhanced reliability with persistent download history
++ Better user experience with detailed download statistics
+
 ## 0.3.1.0806-1730 Media Group Support
 
 ### feature

@@ -48,7 +48,9 @@ class TelegramMediaBot:
         
         # 初始化組件
         self.monitor = DownloadMonitor(self.loop)
-        self.downloader = MediaDownloader(self.client, max_concurrent_downloads=5)
+        # 設定資料庫路徑在專案根目錄
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "downloads.db")
+        self.downloader = MediaDownloader(self.client, max_concurrent_downloads=5, db_path=db_path)
         self.downloader.set_monitor(self.monitor)
         
         self.phone_number = phone_number
@@ -441,6 +443,18 @@ class TelegramMediaBot:
             f"總大小: {final_stats['downloaded_size']/(1024**2):.1f}MB, "
             f"速度: {avg_speed:.1f}MB/s"
         )
+    
+    def get_download_statistics(self):
+        """獲取下載統計信息"""
+        return self.downloader.get_download_statistics()
+    
+    def cleanup_missing_files(self):
+        """清理資料庫中指向不存在文件的記錄"""
+        return self.downloader.cleanup_missing_files()
+    
+    def get_recent_downloads(self, limit=10):
+        """獲取最近下載的文件列表"""
+        return self.downloader.get_recent_downloads(limit)
     
     async def run(self):
         """啟動 Bot"""

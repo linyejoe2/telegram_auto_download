@@ -1,14 +1,21 @@
-# Telegram Auto Download Bot v0.3.1
+# Telegram Auto Download Bot v0.4.0
 
 A high-performance Telegram bot with modular architecture that automatically downloads and backs up media files from forwarded messages, media groups, and their replies to the server for permanent storage.
 
-## 🆕 What's New in v0.3.1
+## 🆕 What's New in v0.4.0
+
+- **🗃️ Database Integration**: SQLite database for persistent download history and metadata tracking
+- **🔍 Smart Duplicates**: Intelligent duplicate detection prevents re-downloading existing files
+- **📊 Download Statistics**: Comprehensive tracking and reporting of download history
+- **⚡ Enhanced Performance**: Database-driven architecture improves scalability and reliability
+- **🔧 Better Management**: Automated database initialization and schema management
+
+## Previous Updates (v0.3.1)
 
 - **📸 Media Group Support**: Automatically detects and processes media groups (albums) as single units
 - **🔄 Smart Collection**: Intelligent 2-second delay collection ensures all grouped messages are captured
 - **🎯 Enhanced Detection**: Multi-method approach handles Bot API and Telethon ID differences
 - **📁 Organized Storage**: Media groups stored in dedicated `mediagroup_{id}_{timestamp}` directories
-- **🔧 Robust Processing**: Graceful fallback when media groups can't be retrieved
 
 ## Previous Updates (v0.3.0)
 
@@ -28,12 +35,14 @@ A high-performance Telegram bot with modular architecture that automatically dow
 
 ### 📥 Download Capabilities  
 - 🤖 Telegram bot interface for easy interaction
-- 📸 **Media Group Support**: Automatically processes grouped media (albums) as single operations (v0.3.1)
+- 📸 **Media Group Support**: Automatically processes grouped media (albums) as single operations
+- 🗃️ **Database Integration**: SQLite database tracks download history and prevents duplicates (v0.4.0)
 - 📥 Downloads media from forwarded messages and all their replies
 - 💾 Permanently stores files on server for backup purposes
 - 🎯 Supports photos, videos, GIFs, audio files, and documents
 - 🔍 Smart file naming with timestamps and message IDs
-- 📁 Organized storage in timestamped directories with media group support (v0.3.1)
+- 📁 Organized storage in timestamped directories with media group support
+- 📊 Database-tracked downloads with comprehensive metadata and statistics (v0.4.0)
 
 ### 🛡️ Reliability & Monitoring
 - **Retry Mechanism**: Exponential backoff for failed downloads (up to 3 attempts)
@@ -219,6 +228,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Disclaimer
 
-This bot (v0.3.0) is for educational and personal backup use. Ensure you comply with Telegram's Terms of Service and respect copyright when backing up media files. Only backup content you have permission to store.
+This bot (v0.4.0) is for educational and personal backup use. Ensure you comply with Telegram's Terms of Service and respect copyright when backing up media files. Only backup content you have permission to store.
 
-**Note**: This version features a completely refactored architecture for improved performance and maintainability. The original monolithic code is preserved as `telegram_bot.py.bak` for reference.
+**Note**: This version features database integration for enhanced download management and tracking. The architecture continues to evolve with modular design principles for improved performance and maintainability.

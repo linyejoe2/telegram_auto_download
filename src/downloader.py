@@ -5,6 +5,7 @@ import time
 import json
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 from telethon.errors import FloodWaitError, RPCError
+from .database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -12,11 +13,12 @@ logger = logging.getLogger(__name__)
 class MediaDownloader:
     """處理媒體文件下載的類"""
     
-    def __init__(self, client, max_concurrent_downloads=5):
+    def __init__(self, client, max_concurrent_downloads=5, db_path="downloads.db"):
         self.client = client
         self.max_concurrent_downloads = max_concurrent_downloads
         self.download_semaphore = asyncio.Semaphore(max_concurrent_downloads)
         self.monitor = None
+        self.db = DatabaseManager(db_path)
     
     def set_monitor(self, monitor):
         """設定監控器"""
@@ -110,6 +112,21 @@ class MediaDownloader:
         if not message.media:
             return []
         
+        # 檢查是否已經下載過這個文件
+        file_unique_id = self._get_file_unique_id(message)
+        if file_unique_id and self.db.is_file_downloaded(file_unique_id):
+            existing_info = self.db.get_downloaded_file_info(file_unique_id)
+            if existing_info and os.path.exists(existing_info['file_path']):
+                logger.info(f"文件已存在，跳過下載: {existing_info['file_name']}")
+                # 更新統計信息 - 標記為跳過
+                if self.monitor:
+                    stats = self.monitor.get_stats()
+                    stats['completed_files'] += 1
+                    self.monitor.update_stats(stats)
+                return [existing_info['file_name']]
+            else:
+                logger.debug(f"檔案記錄存在但實體檔案不存在，將重新下載: {file_unique_id}")
+        
         try:
             os.makedirs(download_dir, exist_ok=True)
             downloaded_files = []
@@ -122,6 +139,8 @@ class MediaDownloader:
                 if await self.download_media_with_retry(message, file_path):
                     downloaded_files.append(file_name)
                     logger.info(f"下載照片: {file_name}")
+                    # 記錄到資料庫
+                    self._record_download_to_db(message, file_name, file_path, "photo", download_dir)
                 else:
                     logger.error(f"照片下載失敗: {file_name}")
                 
@@ -162,6 +181,9 @@ class MediaDownloader:
                 if await self.download_media_with_retry(message, file_path):
                     downloaded_files.append(file_name)
                     logger.info(f"下載文檔: {file_name}")
+                    # 記錄到資料庫
+                    mime_type = document.mime_type if document else None
+                    self._record_download_to_db(message, file_name, file_path, "document", download_dir, original_name, mime_type)
                 else:
                     logger.error(f"文檔下載失敗: {file_name}")
             
@@ -176,12 +198,33 @@ class MediaDownloader:
         if not messages:
             return []
         
+        # 過濾已下載的文件
+        messages_to_download = []
+        skipped_count = 0
+        
+        for message in messages:
+            if not message.media:
+                continue
+                
+            file_unique_id = self._get_file_unique_id(message)
+            if file_unique_id and self.db.is_file_downloaded(file_unique_id):
+                existing_info = self.db.get_downloaded_file_info(file_unique_id)
+                if existing_info and os.path.exists(existing_info['file_path']):
+                    logger.debug(f"跳過已下載的文件: {existing_info['file_name']}")
+                    skipped_count += 1
+                    continue
+            
+            messages_to_download.append(message)
+        
+        if skipped_count > 0:
+            logger.info(f"跳過 {skipped_count} 個已下載的文件")
+        
         # 統計總文件數和總大小
-        total_media_count = sum(1 for msg in messages if msg.media)
+        total_media_count = len(messages_to_download)
         
         # 計算總文件大小
         total_size = 0
-        for message in messages:
+        for message in messages_to_download:
             if message.media:
                 size = await self.get_media_size(message)
                 total_size += size
@@ -192,7 +235,8 @@ class MediaDownloader:
             stats.update({
                 'total_files': total_media_count,
                 'total_size': total_size,
-                'start_time': time.time()
+                'start_time': time.time(),
+                'completed_files': stats.get('completed_files', 0) + skipped_count  # 將跳過的文件算作已完成
             })
             self.monitor.update_stats(stats)
         
@@ -203,7 +247,7 @@ class MediaDownloader:
         
         # 創建下載任務
         download_tasks = []
-        for message in messages:
+        for message in messages_to_download:
             if message.media:
                 task = self.download_media_from_message(message, download_dir)
                 download_tasks.append(task)
@@ -249,3 +293,69 @@ class MediaDownloader:
         except Exception as e:
             logger.warning(f"無法載入進度: {e}")
         return {"completed_files": [], "failed_files": []}
+    
+    def _get_file_unique_id(self, message):
+        """獲取文件的唯一 ID"""
+        try:
+            if not message.media:
+                return None
+                
+            if isinstance(message.media, MessageMediaPhoto):
+                return message.media.photo.id
+            elif isinstance(message.media, MessageMediaDocument):
+                return message.media.document.id
+        except Exception as e:
+            logger.debug(f"獲取文件唯一 ID 時出錯: {e}")
+        return None
+    
+    def _record_download_to_db(self, message, file_name, file_path, file_type, 
+                              download_dir, original_file_name=None, mime_type=None):
+        """記錄下載信息到資料庫"""
+        try:
+            file_unique_id = self._get_file_unique_id(message)
+            if not file_unique_id:
+                return False
+            
+            file_id = ""
+            if isinstance(message.media, MessageMediaPhoto):
+                file_id = message.media.photo.access_hash
+            elif isinstance(message.media, MessageMediaDocument):
+                file_id = message.media.document.access_hash
+            
+            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else None
+            
+            success = self.db.record_download(
+                file_unique_id=str(file_unique_id),
+                file_id=str(file_id),
+                message_id=message.id,
+                chat_id=message.peer_id.channel_id if hasattr(message.peer_id, 'channel_id') else 0,
+                file_name=file_name,
+                file_path=file_path,
+                original_file_name=original_file_name,
+                file_size=file_size,
+                file_type=file_type,
+                mime_type=mime_type,
+                message_date=message.date
+            )
+            
+            if success:
+                logger.debug(f"成功記錄下載信息到資料庫: {file_name}")
+            else:
+                logger.warning(f"記錄下載信息失敗: {file_name}")
+                
+            return success
+        except Exception as e:
+            logger.error(f"記錄下載信息到資料庫時出錯: {e}")
+            return False
+    
+    def get_download_statistics(self):
+        """獲取下載統計信息"""
+        return self.db.get_download_statistics()
+    
+    def cleanup_missing_files(self):
+        """清理資料庫中指向不存在文件的記錄"""
+        return self.db.cleanup_missing_files()
+    
+    def get_recent_downloads(self, limit=10):
+        """獲取最近下載的文件列表"""
+        return self.db.get_recent_downloads(limit)
