@@ -1,8 +1,16 @@
-# Telegram Auto Download Bot v0.3.0
+# Telegram Auto Download Bot v0.3.1
 
-A high-performance Telegram bot with modular architecture that automatically downloads and backs up media files from forwarded messages and their replies to the server for permanent storage.
+A high-performance Telegram bot with modular architecture that automatically downloads and backs up media files from forwarded messages, media groups, and their replies to the server for permanent storage.
 
-## 🆕 What's New in v0.3.0
+## 🆕 What's New in v0.3.1
+
+- **📸 Media Group Support**: Automatically detects and processes media groups (albums) as single units
+- **🔄 Smart Collection**: Intelligent 2-second delay collection ensures all grouped messages are captured
+- **🎯 Enhanced Detection**: Multi-method approach handles Bot API and Telethon ID differences
+- **📁 Organized Storage**: Media groups stored in dedicated `mediagroup_{id}_{timestamp}` directories
+- **🔧 Robust Processing**: Graceful fallback when media groups can't be retrieved
+
+## Previous Updates (v0.3.0)
 
 - **🏗️ Complete Architecture Refactor**: Transformed monolithic 596-line file into clean 3-module structure
 - **📊 Enhanced Progress Display**: Shows total file sizes and completion percentages in real-time
@@ -20,11 +28,12 @@ A high-performance Telegram bot with modular architecture that automatically dow
 
 ### 📥 Download Capabilities  
 - 🤖 Telegram bot interface for easy interaction
+- 📸 **Media Group Support**: Automatically processes grouped media (albums) as single operations (v0.3.1)
 - 📥 Downloads media from forwarded messages and all their replies
 - 💾 Permanently stores files on server for backup purposes
 - 🎯 Supports photos, videos, GIFs, audio files, and documents
 - 🔍 Smart file naming with timestamps and message IDs
-- 📁 Organized storage in timestamped directories
+- 📁 Organized storage in timestamped directories with media group support (v0.3.1)
 
 ### 🛡️ Reliability & Monitoring
 - **Retry Mechanism**: Exponential backoff for failed downloads (up to 3 attempts)

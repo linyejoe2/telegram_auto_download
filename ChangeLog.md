@@ -1,5 +1,40 @@
 # ChangeLog
 
+## 0.3.1.0806-1730 Media Group Support
+
+### feature
+
++ **Media Group Detection and Processing** - Intelligent handling of grouped media (albums)
+  + Automatically detects messages with `media_group_id` from Bot API
+  + Implements 2-second collection delay to ensure all grouped messages are captured
+  + Smart collection mechanism with timer-based processing
+  + Enhanced logging for media group collection progress
+
++ **Advanced Media Group Retrieval** - Multi-method approach for robust media group handling
+  + Method 1: Direct `grouped_id` matching using Telethon API
+  + Method 2: Range-based search around original message ID (±20 messages)
+  + Method 3: Graceful fallback to original message processing
+  + Handles Bot API and Telethon ID differences intelligently
+
++ **Enhanced Architecture** - Extended modular design for media group support
+  + `_handle_media_group()` - Collects and manages grouped messages
+  + `_process_media_group_delayed()` - Timer-based processing with async delay
+  + `_process_grouped_messages()` - Dedicated media group download workflow
+  + `_process_single_message()` - Refactored single message processing
+  + `_download_and_monitor()` - Shared download and monitoring logic
+
++ **Smart Storage Organization** - Media group aware directory structure
+  + Media groups stored in `mediagroup_{id}_{timestamp}` directories
+  + Single messages continue using `message_{id}_{timestamp}` format
+  + Preserves existing file naming conventions and organization
+
+### improve
+
++ Enhanced bot architecture with clear separation of group vs single message processing
++ Improved error handling and logging for media group operations
++ Better resource management with shared download monitoring logic
++ More robust message collection with multiple detection methods
+
 ## 0.3.0.0806-1430 Major Architecture Refactoring
 
 ### refactor
