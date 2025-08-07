@@ -1,5 +1,58 @@
 # ChangeLog
 
+## 1.0.0.0807 Code Architecture Refactoring and Interactive Folder Navigation
+
+### feature
+
++ **Interactive Folder Navigation System** - New folder selection interface for organized downloads
+  + Add `src/folder_navigator.py` - Complete folder navigation and management system
+  + Interactive commands: `/cr folder_name` (create), `/cd folder_name` (navigate), `/cd..` (back), `/ok` (confirm)
+  + Real-time folder structure display with breadcrumb navigation
+  + User session management with pending message tracking
+  + Smart folder creation and validation with path safety checks
+  + Media type statistics display during folder selection
+
++ **Enhanced User Experience** - Step-by-step folder selection workflow
+  + Users can organize downloads into custom folder structures before downloading
+  + Visual folder tree display with current location indication
+  + Media preview showing file counts (photos, videos, documents) before folder selection
+  + Confirmation system prevents accidental downloads to wrong locations
+
+### refactor
+
++ **Major Bot Logic Simplification** - Streamlined message processing flow
+  + Refactored complex nested processing into clean linear flow: command check → downloadable check → extract files → folder selection → download
+  + Restructured `src/bot.py` with improved architecture (195 insertions, 166 deletions)
+  + Eliminated duplicate code patterns and consolidated helper methods
+  + Combined redundant processing paths into unified `_process_message()` workflow
+
++ **Code Architecture Improvements**
+  + New helper methods: `_handle_commands()`, `_is_downloadable_message()`, `_extract_forward_info()`, `_extract_all_files()`, `_count_media_types()`
+  + Unified download processing with `_process_confirmed_download()` replacing separate media group/single message methods
+  + Centralized error message generation and forward info extraction
+  + Simplified media group collection logic while maintaining all functionality
+
+### improve
+
++ **Enhanced Code Maintainability**
+  + Clear separation of concerns with single-responsibility methods
+  + Linear execution flow eliminates complex branching logic
+  + Better error handling with standardized message templates
+  + Improved method naming for better code readability
+
++ **Database Protection** - Enhanced git workflow
+  + Updated `.gitignore` to properly exclude database files (`*.db`, `downloads.db`)
+  + Prevents accidental tracking of user data and download history
+  + Better project structure with protected sensitive files
+
+### misc
+
++ Add `test_folder_navigation.py` - Testing framework for folder navigation system
++ Update `src/__init__.py` - Export folder navigator for modular access
++ All refactored code passes syntax validation and import tests
++ Preserved all existing functionality while adding new interactive features
++ Database integration and media group processing remain fully functional
+
 ## 0.4.0.0806-2329 Database Integration and Enhanced Management
 
 ### feature

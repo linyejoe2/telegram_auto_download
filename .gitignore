@@ -150,3 +150,10 @@ logs/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+downloads.db
