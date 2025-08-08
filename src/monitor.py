@@ -107,12 +107,8 @@ class DownloadMonitor:
         try:
             await processing_msg.edit_text(text)
         except Exception as e:
-            # 特別處理「消息未修改」錯誤，這是正常情況
-            if "Message is not modified" in str(e):
-                logger.debug("消息內容相同，跳過更新")
-            else:
-                # 忽略其他消息更新錯誤，不影響下載進程
-                logger.debug(f"消息更新失敗: {e}")
+            # 忽略消息更新錯誤，不影響下載進程
+            logger.debug(f"消息更新失敗: {e}")
 
     def stop_monitoring(self):
         """停止監控線程"""
