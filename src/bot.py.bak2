@@ -7,7 +7,6 @@ from datetime import datetime
 from dataclasses import dataclass
 
 from telethon import TelegramClient
-from telethon.types import Message as Message2
 from telethon.errors import RPCError
 from telegram import Update, BotCommand, Message
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -96,8 +95,8 @@ class MessageProcessor:
             logger.info(f"Fetching message chat_id={chat_id}, message_id={message_id}")
             
             # Get chat entity and original message
-            self.chat = await self.client.get_entity(chat_id)
-            original_message = await self.client.get_messages(self.chat, ids=message_id)
+            chat = await self.client.get_entity(chat_id)
+            original_message = await self.client.get_messages(chat, ids=message_id)
             
             if not original_message:
                 logger.warning(f"Message ID {message_id} not found")
@@ -106,7 +105,7 @@ class MessageProcessor:
             # Get replies
             replies = []
             try:
-                async for reply in self.client.iter_messages(self.chat, reply_to=message_id):
+                async for reply in self.client.iter_messages(chat, reply_to=message_id):
                     replies.append(reply)
             except Exception as e:
                 logger.warning(f"Error getting replies: {e}")
@@ -138,8 +137,8 @@ class MessageProcessor:
         else:
             return ForwardInfo(None, None, None)
     
-    async def extract_all_media_files(self, original_message: Message, replies: List[Message], 
-                                    media_group_messages: List[Message] | None) -> List[Any]:
+    async def extract_all_media_files(self, original_message, replies: List[Any], 
+                                    chat_id: int, is_group: bool) -> List[Any]:
         """Extract all media files from message and replies"""
         messages_to_download = []
         
@@ -147,14 +146,24 @@ class MessageProcessor:
         if original_message.media:
             messages_to_download.append(original_message)
         
+        # Handle media group
+        if is_group and hasattr(original_message, 'grouped_id') and original_message.grouped_id:
+            try:
+                telethon_group_id = original_message.grouped_id
+                async for msg in self.client.iter_messages(chat_id, limit=100):
+                    if (hasattr(msg, 'grouped_id') and 
+                        msg.grouped_id == telethon_group_id and 
+                        msg.media and 
+                        msg.id != original_message.id):
+                        messages_to_download.append(msg)
+                logger.info(f"Found {len(messages_to_download)} media files in group")
+            except Exception as e:
+                logger.warning(f"Cannot get media group files: {e}")
+        
         # Add media from replies
         for reply in replies:
             if reply.media:
                 messages_to_download.append(reply)
-        
-        if media_group_messages:
-            for message in media_group_messages:
-                messages_to_download.append(await self.client.get_messages(self.chat, ids=message.message_id))
         
         return messages_to_download
     
@@ -205,6 +214,28 @@ class TelegramMediaBot:
         # Handlers
         self.media_group_handler = MediaGroupHandler()
         self.message_processor = MessageProcessor(self.client)
+    
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Main message handler"""
+        message = update.message
+        user_id = message.from_user.id
+        
+        # Handle commands
+        if await self._handle_commands(message, user_id):
+            return
+        
+        # Check if message is downloadable
+        if not self._is_downloadable_message(message):
+            await self._send_usage_instruction(message)
+            return
+        
+        # Handle media group or single message
+        if message.media_group_id:
+            self.media_group_handler.add_message_and_set_timer(
+                message.media_group_id, message, self._process_message
+            )
+        else:
+            await self._process_message(message)
     
     async def _handle_commands(self, message: Message, user_id: int) -> bool:
         """Handle bot commands, return True if handled"""
@@ -264,29 +295,6 @@ class TelegramMediaBot:
             instruction = "❌ 暫不支援來自私人聊天或隱藏用戶的轉發訊息"
         
         await message.reply_text(instruction)
-        
-    
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Main message handler"""
-        message = update.message
-        user_id = message.from_user.id
-        
-        # Handle commands
-        if await self._handle_commands(message, user_id):
-            return
-        
-        # Check if message is downloadable
-        if not self._is_downloadable_message(message):
-            await self._send_usage_instruction(message)
-            return
-        
-        # Handle media group or single message
-        if message.media_group_id:
-            self.media_group_handler.add_message_and_set_timer(
-                message.media_group_id, message, self._process_message
-            )
-        else:
-            await self._process_message(message)
     
     async def _process_message(self, message: Message, group_messages: Optional[List[Message]] = None) -> None:
         """Process a single message or media group"""
@@ -324,7 +332,7 @@ class TelegramMediaBot:
             
             # Extract all media files
             messages_to_download = await self.message_processor.extract_all_media_files(
-                original_message, replies, group_messages
+                original_message, replies, forward_info.chat_id, is_group
             )
             
             if not messages_to_download:
@@ -334,7 +342,7 @@ class TelegramMediaBot:
             # Count media types and start folder selection
             media_counts = self.message_processor.count_media_types(messages_to_download)
             folder_ui = self.folder_navigator.start_folder_selection(
-                user_id, messages_to_download, media_counts.__dict__
+                user_id, group_messages or [message], media_counts.__dict__
             )
             await processing_msg.edit_text(folder_ui)
             
@@ -360,16 +368,44 @@ class TelegramMediaBot:
             logger.error(f"Error starting download process: {e}")
             await message.reply_text(f"❌ 開始下載時出錯: {str(e)}")
     
-    async def _execute_download(self, processing_msg: Message2, pending_messages: List[Message2], selected_path: str) -> None:
+    async def _execute_download(self, processing_msg: Message, pending_messages: List[Message], selected_path: str) -> None:
         """Execute the download process"""
-        try:           
+        try:
+            first_message = pending_messages[0]
+            
+            # Extract source info
+            forward_info = self.message_processor.extract_forward_info(first_message)
+            if not forward_info.chat_id:
+                await processing_msg.edit_text("❌ 無法處理此類型的轉發訊息")
+                return
+            
+            # Get original message and replies
+            original_message, replies = await self.message_processor.get_message_with_replies(
+                forward_info.chat_id, forward_info.message_id
+            )
+            
+            if not original_message:
+                await processing_msg.edit_text("❌ 無法訪問原始訊息")
+                return
+            
+            # Extract all files for download
+            is_group = len(pending_messages) > 1
+            messages_to_download = await self.message_processor.extract_all_media_files(
+                original_message, replies, forward_info.chat_id, is_group
+            )
+            
+            if not messages_to_download:
+                await processing_msg.edit_text("ℹ️ 該訊息及其回覆中沒有找到任何媒體文件")
+                return
+            
             # Create download directory and start download
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            dir_prefix = "message"
+            dir_prefix = "mediagroup" if is_group else "message"
+            download_dir = os.path.join(selected_path, f"{dir_prefix}_{forward_info.message_id}_{timestamp}")
             
             await self._download_with_monitoring(
-                processing_msg, pending_messages, selected_path
-                # processing_msg.id, self.chat
+                processing_msg, messages_to_download, download_dir, 
+                forward_info.message_id, forward_info.chat_name
             )
             
         except Exception as e:
@@ -377,9 +413,7 @@ class TelegramMediaBot:
             await processing_msg.edit_text(f"❌ 處理時出錯: {str(e)}")
     
     async def _download_with_monitoring(self, processing_msg: Message, messages_to_download: List[Any], 
-                                      download_dir: str, 
-                                      original_message_id: int = 0, chat_name: str = ""
-                                      ) -> None:
+                                      download_dir: str, original_message_id: int, chat_name: str) -> None:
         """Handle download with monitoring and result reporting"""
         # Initialize monitoring
         self.monitor.update_stats({
