@@ -1,5 +1,38 @@
 # ChangeLog
 
+## 0.5.0.0811-1135 Interactive Folder Navigation
+
+### feature
+
++ **Interactive Folder Navigation System** - Complete user-controlled download organization
+  + Real-time folder selection with interactive commands (`/cr`, `/cd`, `/cd..`, `/ok`)
+  + Dynamic folder creation and navigation during download process
+  + Live media statistics display for each folder (videos, photos, documents)
+  + Seamless integration with existing download workflow
+  + Multi-language command support (English and Chinese aliases)
+
++ **Enhanced User Experience** - Intuitive folder management interface
+  + Visual folder tree display with current location indicator
+  + Real-time feedback for folder operations (create, navigate, confirm)
+  + Smart path validation and error handling
+  + User state management for concurrent sessions
+  + Clear command instructions and help text
+
++ **Flexible Download Organization** - User-controlled file placement
+  + Choose destination folder before download starts
+  + Create nested folder structures on-the-fly
+  + Browse existing folders with media count previews
+  + Organize downloads by topic, date, or any custom structure
+  + Maintain clean separation between different download sessions
+
+### improve
+
++ Enhanced bot architecture with dedicated folder navigation component
++ Improved user workflow with clear separation of folder selection and download phases
++ Better error handling and user feedback for folder operations
++ More intuitive download organization compared to automatic timestamped directories
++ Cleaner code organization with `FolderNavigator` class handling all path logic
+
 ## 0.4.0.0806-2329 Database Integration and Enhanced Management
 
 ### feature

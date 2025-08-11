@@ -1,8 +1,16 @@
-# Telegram Auto Download Bot v0.4.0
+# Telegram Auto Download Bot v0.5.0
 
 A high-performance Telegram bot with modular architecture that automatically downloads and backs up media files from forwarded messages, media groups, and their replies to the server for permanent storage.
 
-## 🆕 What's New in v0.4.0
+## 🆕 What's New in v0.5.0
+
+- **📁 Interactive Folder Navigation**: Choose where to save your downloads with intuitive folder commands
+- **🗂️ Dynamic Folder Management**: Create folders, navigate directories, and organize your downloads in real-time
+- **📊 Live Folder Stats**: See existing media counts in each folder before choosing your download location
+- **🎯 Smart Path Selection**: Interactive UI guides you through folder selection with immediate feedback
+- **🔄 Seamless Integration**: Folder navigation seamlessly integrates with existing download workflow
+
+## Previous Updates (v0.4.0)
 
 - **🗃️ Database Integration**: SQLite database for persistent download history and metadata tracking
 - **🔍 Smart Duplicates**: Intelligent duplicate detection prevents re-downloading existing files
@@ -35,13 +43,14 @@ A high-performance Telegram bot with modular architecture that automatically dow
 
 ### 📥 Download Capabilities  
 - 🤖 Telegram bot interface for easy interaction
+- 📁 **Interactive Folder Navigation**: Choose your download location with intuitive folder commands (v0.5.0)
 - 📸 **Media Group Support**: Automatically processes grouped media (albums) as single operations
 - 🗃️ **Database Integration**: SQLite database tracks download history and prevents duplicates (v0.4.0)
 - 📥 Downloads media from forwarded messages and all their replies
 - 💾 Permanently stores files on server for backup purposes
 - 🎯 Supports photos, videos, GIFs, audio files, and documents
 - 🔍 Smart file naming with timestamps and message IDs
-- 📁 Organized storage in timestamped directories with media group support
+- 📁 Organized storage with user-controlled folder structure and media group support (v0.5.0)
 - 📊 Database-tracked downloads with comprehensive metadata and statistics (v0.4.0)
 
 ### 🛡️ Reliability & Monitoring
@@ -116,8 +125,30 @@ python main.py
 2. In Telegram:
    - Find your bot by username
    - Forward any message with media to the bot
+   - Navigate through folders using interactive commands:
+     - `/cr <name>` - Create a new folder
+     - `/cd <name>` - Enter a folder
+     - `/cd..` - Go back to parent directory
+     - `/ok` - Confirm location and start download
    - Watch real-time progress updates with download speeds and completion percentage
    - Receive detailed completion summary with performance metrics and storage location
+
+### Example Folder Navigation
+
+```
+📂 請選擇存放位置
+目前在: /
+資料夾: movies, photos, documents
+影片 12 個
+照片 45 個
+檔案 8 個
+
+命令說明:
+• /cr <名稱> - 創建資料夾
+• /cd <名稱> - 進入資料夾
+• /cd.. - 返回上級
+• /ok - 確認位置並開始下載
+```
 
 ### Example Progress Updates
 
@@ -136,15 +167,18 @@ python main.py
 telegram_auto_download/
 ├── src/
 │   ├── __init__.py             # Package initialization and exports
-│   ├── bot.py                  # Main bot logic and message handling (247 lines)
+│   ├── bot.py                  # Main bot logic and message handling (570+ lines)
 │   ├── downloader.py          # Download operations with concurrency (234 lines) 
 │   ├── monitor.py             # Real-time monitoring and progress (134 lines)
+│   ├── database.py            # SQLite database management (v0.4.0)
+│   ├── folder_navigator.py    # Interactive folder navigation (v0.5.0)
 │   └── telegram_bot.py.bak    # Original monolithic file (backup)
 ├── config/
 │   └── config.py              # Configuration management
 ├── main.py                    # Application entry point
 ├── logs/                      # Log files (auto-created)
-├── downloads/                 # Permanent backup directory
+├── downloads/                 # Permanent backup directory with user-organized structure
+├── downloads.db               # SQLite database for download history (v0.4.0)
 ├── requirements.txt           # Python dependencies
 ├── ChangeLog.md              # Project changelog
 ├── CLAUDE.md                 # Development documentation
@@ -156,6 +190,8 @@ telegram_auto_download/
 - **src/bot.py**: Main orchestration - handles Telegram interactions and coordinates other components
 - **src/downloader.py**: Concurrent download engine with retry mechanisms and progress tracking  
 - **src/monitor.py**: Real-time monitoring with background thread for progress updates and system stats
+- **src/database.py**: SQLite database management for download history and duplicate prevention (v0.4.0)
+- **src/folder_navigator.py**: Interactive folder navigation and path management system (v0.5.0)
 - **Modular Design**: Each component has single responsibility and clean interfaces
 
 ## Supported Media Types
@@ -228,6 +264,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Disclaimer
 
-This bot (v0.4.0) is for educational and personal backup use. Ensure you comply with Telegram's Terms of Service and respect copyright when backing up media files. Only backup content you have permission to store.
+This bot (v0.5.0) is for educational and personal backup use. Ensure you comply with Telegram's Terms of Service and respect copyright when backing up media files. Only backup content you have permission to store.
 
-**Note**: This version features database integration for enhanced download management and tracking. The architecture continues to evolve with modular design principles for improved performance and maintainability.
+**Note**: This version features interactive folder navigation for enhanced download organization, along with database integration for comprehensive download management and tracking. The architecture continues to evolve with modular design principles for improved performance and maintainability.

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
+from .folder_navigator import FolderNavigator
 
 # 設定日誌
 logging.basicConfig(
@@ -52,6 +53,10 @@ class TelegramMediaBot:
         db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "downloads.db")
         self.downloader = MediaDownloader(self.client, max_concurrent_downloads=5, db_path=db_path)
         self.downloader.set_monitor(self.monitor)
+        
+        # 初始化資料夾導航器
+        downloads_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "downloads")
+        self.folder_navigator = FolderNavigator(base_path=downloads_path)
         
         self.phone_number = phone_number
         self.bot_token = bot_token
@@ -114,12 +119,37 @@ class TelegramMediaBot:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理收到的訊息"""
         message = update.message
+        user_id = message.from_user.id
+        
+        # 檢查是否為資料夾命令
+        if message.text and self.folder_navigator.is_folder_command(message.text):
+            response, is_confirmed = self.folder_navigator.process_folder_command(user_id, message.text)
+            await message.reply_text(response)
+            
+            # 如果確認了資料夾選擇，開始下載
+            if is_confirmed:
+                pending_messages = self.folder_navigator.get_pending_messages(user_id)
+                if pending_messages:
+                    await self._start_download_with_selected_folder(update, context, pending_messages)
+                    # 清除用戶狀態
+                    self.folder_navigator.clear_user_state(user_id)
+            return
+        
+        # 檢查用戶是否正在選擇資料夾，如果是則忽略非命令消息
+        if self.folder_navigator.is_awaiting_folder_selection(user_id):
+            await message.reply_text("請使用資料夾命令: /cr 創建資料夾, /cd 進入資料夾, /cd.. 返回上級, /ok 確認位置")
+            return
         
         # 檢查是否為轉發訊息
         if not message.forward_origin:
             await message.reply_text(
                 "請轉發一則訊息給我，我會備份該訊息及其所有回覆中的媒體文件到伺服器！\n\n"
-                "支援的媒體類型：照片、影片、GIF、音訊等"
+                "支援的媒體類型：照片、影片、GIF、音訊等\n\n"
+                "資料夾命令:\n"
+                "• /cr <名稱> - 創建資料夾\n"
+                "• /cd <名稱> - 進入資料夾\n" 
+                "• /cd.. - 返回上級目錄\n"
+                "• /ok - 確認當前位置並開始下載"
             )
             return
         
@@ -180,9 +210,10 @@ class TelegramMediaBot:
     async def _process_grouped_messages(self, update: Update, group_messages: list):
         """處理合併的媒體組消息"""
         primary_message = update.message
+        user_id = primary_message.from_user.id
         
         # 發送處理中訊息 - 只對第一個消息回復
-        processing_msg = await primary_message.reply_text(f"🔄 正在備份媒體組 ({len(group_messages)} 個文件)，請稍候...")
+        processing_msg = await primary_message.reply_text(f"🔄 正在分析媒體組 ({len(group_messages)} 個文件)，請稍候...")
         
         try:
             # 提取原訊息資訊
@@ -219,11 +250,6 @@ class TelegramMediaBot:
                 )
                 await processing_msg.edit_text(error_msg)
                 return
-            
-            # 創建下載目錄
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            download_dir = os.path.join('downloads', f"mediagroup_{primary_message.media_group_id}_{timestamp}")
-            os.makedirs(download_dir, exist_ok=True)
             
             # 準備所有需要下載的消息（包含媒體組中的所有消息）
             messages_to_download = []
@@ -293,7 +319,26 @@ class TelegramMediaBot:
                 await processing_msg.edit_text("ℹ️ 該媒體組及相關回覆中沒有找到任何媒體文件")
                 return
             
-            await self._download_and_monitor(processing_msg, messages_to_download, download_dir, original_message_id, chat_name)
+            # 統計即將下載的媒體類型（用於顯示）
+            download_media_counts = {'video': 0, 'photo': 0, 'document': 0}
+            for msg in messages_to_download:
+                if hasattr(msg, 'video') and msg.video:
+                    download_media_counts['video'] += 1
+                elif hasattr(msg, 'photo') and msg.photo:
+                    download_media_counts['photo'] += 1
+                elif hasattr(msg, 'document') and msg.document:
+                    download_media_counts['document'] += 1
+            
+            # 觸發資料夾選擇（不傳遞media_counts，讓FolderNavigator自己計算當前資料夾的媒體統計）
+            folder_ui_text = self.folder_navigator.start_folder_selection(user_id, messages_to_download, {'video': 0, 'photo': 0, 'document': 0})
+            
+            # 添加下載資訊到文字
+            info_text = f"📊 找到 {len(messages_to_download)} 個媒體文件\n"
+            info_text += f"影片: {download_media_counts['video']} 個, 照片: {download_media_counts['photo']} 個, 檔案: {download_media_counts['document']} 個\n\n"
+            info_text += folder_ui_text + "\n\n"
+            info_text += "命令說明:\n• /cr <名稱> - 創建資料夾\n• /cd <名稱> - 進入資料夾\n• /cd.. - 返回上級\n• /ok - 確認位置並開始下載"
+            
+            await processing_msg.edit_text(info_text)
             
         except Exception as e:
             logger.error(f"處理媒體組時出錯: {e}")
@@ -342,11 +387,6 @@ class TelegramMediaBot:
                 await processing_msg.edit_text(error_msg)
                 return
             
-            # 創建下載目錄
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            download_dir = os.path.join('downloads', f"message_{original_message_id}_{timestamp}")
-            os.makedirs(download_dir, exist_ok=True)
-            
             # 準備所有需要下載的消息
             messages_to_download = []
             if original_message.media:
@@ -360,11 +400,58 @@ class TelegramMediaBot:
                 await processing_msg.edit_text("ℹ️ 該訊息及其回覆中沒有找到任何媒體文件")
                 return
             
-            await self._download_and_monitor(processing_msg, messages_to_download, download_dir, original_message_id, chat_name)
+            # 統計即將下載的媒體類型（用於顯示）
+            download_media_counts = {'video': 0, 'photo': 0, 'document': 0}
+            for msg in messages_to_download:
+                if hasattr(msg, 'video') and msg.video:
+                    download_media_counts['video'] += 1
+                elif hasattr(msg, 'photo') and msg.photo:
+                    download_media_counts['photo'] += 1
+                elif hasattr(msg, 'document') and msg.document:
+                    download_media_counts['document'] += 1
+            
+            # 獲取用戶ID
+            user_id = message.from_user.id
+            
+            # 觸發資料夾選擇（不傳遞media_counts，讓FolderNavigator自己計算當前資料夾的媒體統計）
+            folder_ui_text = self.folder_navigator.start_folder_selection(user_id, messages_to_download, {'video': 0, 'photo': 0, 'document': 0})
+            
+            # 添加下載資訊到文字
+            info_text = f"📊 找到 {len(messages_to_download)} 個媒體文件\n"
+            info_text += f"影片: {download_media_counts['video']} 個, 照片: {download_media_counts['photo']} 個, 檔案: {download_media_counts['document']} 個\n\n"
+            info_text += folder_ui_text + "\n\n"
+            info_text += "命令說明:\n• /cr <名稱> - 創建資料夾\n• /cd <名稱> - 進入資料夾\n• /cd.. - 返回上級\n• /ok - 確認位置並開始下載"
+            
+            await processing_msg.edit_text(info_text)
             
         except Exception as e:
             logger.error(f"處理訊息時出錯: {e}")
             await processing_msg.edit_text(f"❌ 處理時出錯: {str(e)}")
+    
+    async def _start_download_with_selected_folder(self, update: Update, context: ContextTypes.DEFAULT_TYPE, messages_to_download: list):
+        """使用選定的資料夾開始下載"""
+        message = update.message
+        user_id = message.from_user.id
+        
+        # 獲取用戶選擇的資料夾路徑
+        selected_folder = self.folder_navigator.get_selected_path(user_id)
+        
+        # 發送開始下載訊息
+        processing_msg = await message.reply_text("🚀 開始下載到選定的資料夾...")
+        
+        try:
+            os.makedirs(selected_folder, exist_ok=True)
+            
+            # 從第一個消息獲取原始訊息資訊（用於顯示）
+            original_message_id = messages_to_download[0].id
+            chat_name = "Telegram"  # 預設名稱，因為這些已經是從Telethon獲取的消息
+            
+            # 開始下載和監控
+            await self._download_and_monitor(processing_msg, messages_to_download, selected_folder, original_message_id, chat_name)
+            
+        except Exception as e:
+            logger.error(f"開始下載時出錯: {e}")
+            await processing_msg.edit_text(f"❌ 開始下載時出錯: {str(e)}")
     
     async def _download_and_monitor(self, processing_msg, messages_to_download, download_dir, original_message_id, chat_name):
         """共用的下載和監控邏輯"""

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v0.4.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes, with integrated SQLite database for download history and duplicate prevention. The bot uses both the Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) to access different functionality, with enhanced media group detection and processing capabilities.
+This is a Telegram bot (v0.5.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes, with integrated SQLite database for download history and duplicate prevention. The bot uses both the Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) to access different functionality, with enhanced media group detection and processing capabilities, plus interactive folder navigation for user-controlled download organization.
 
 ## Development Commands
 
@@ -29,6 +29,7 @@ pip install -r requirements.txt
 - **src/downloader.py**: Media download operations with concurrent processing (`MediaDownloader` class)
 - **src/monitor.py**: Real-time monitoring and progress tracking (`DownloadMonitor` class)
 - **src/database.py**: SQLite database management for download history and metadata (v0.4.0)
+- **src/folder_navigator.py**: Interactive folder navigation and path management system (v0.5.0)
 - **config/config.py**: Configuration management using environment variables from `.env` file
 
 ### Key Architecture Patterns
@@ -53,10 +54,12 @@ pip install -r requirements.txt
 3. Bot extracts original chat and message information from forward metadata
 4. Database checks for existing downloads to prevent duplicates (v0.4.0)
 5. Uses Telethon client to access the original message, media groups, and all replies
-6. Downloads all media files concurrently using `MediaDownloader` 
-7. Database records download metadata and file information (v0.4.0)
-8. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
-9. Provides completion summary with performance metrics and storage location
+6. `FolderNavigator` presents interactive folder selection UI with existing folder statistics (v0.5.0)
+7. User navigates folders using commands (`/cr`, `/cd`, `/cd..`, `/ok`) to select download location (v0.5.0)
+8. Downloads all media files concurrently using `MediaDownloader` to user-selected folder (v0.5.0)
+9. Database records download metadata and file information (v0.4.0)
+10. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
+11. Provides completion summary with performance metrics and storage location
 
 ### Key Classes and Methods
 
@@ -85,6 +88,14 @@ Real-time monitoring and progress tracking:
 - `calculate_speed()` / `calculate_eta()`: Performance metrics calculations
 - `get_disk_usage()`: System resource monitoring
 
+#### `FolderNavigator` (src/folder_navigator.py) 
+Interactive folder navigation and path management (v0.5.0):
+- `start_folder_selection()`: Initiates folder selection workflow with media statistics
+- `process_folder_command()`: Handles folder navigation commands (`/cr`, `/cd`, `/cd..`, `/ok`)
+- `get_selected_path()`: Returns user-selected download destination path
+- `_generate_folder_ui()`: Creates interactive folder browsing interface
+- `is_awaiting_folder_selection()`: Manages user state during folder selection
+
 ### Configuration Requirements
 
 The bot requires these environment variables in `.env`:
@@ -100,15 +111,16 @@ The bot requires these environment variables in `.env`:
 telegram_auto_download/
 ├── src/
 │   ├── __init__.py              # Package initialization and exports
-│   ├── bot.py                   # Main bot logic with media group support (420+ lines)
+│   ├── bot.py                   # Main bot logic with media group support (570+ lines)
 │   ├── downloader.py           # Download operations with concurrency (234 lines)
 │   ├── monitor.py              # Real-time monitoring and progress (134 lines)
 │   ├── database.py             # SQLite database management and operations (v0.4.0)
+│   ├── folder_navigator.py     # Interactive folder navigation system (260 lines, v0.5.0)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)
 ├── config/
 │   └── config.py               # Configuration management
 ├── main.py                     # Application entry point
-├── downloads/                  # Permanent backup directory (auto-created)
+├── downloads/                  # User-organized backup directory with folder structure (v0.5.0)
 ├── logs/                       # Log files directory (auto-created)
 ├── downloads.db                # SQLite database for download history (v0.4.0)
 └── bot_session.session         # Telethon session file (auto-generated)
@@ -146,15 +158,21 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 
 ### Bot Capabilities
 - Bot supports forwarded messages from channels and group chats only (not private chats)
+- **Interactive Folder Navigation**: Users can choose download destination with real-time folder browsing (v0.5.0)
 - **Media Group Detection**: Automatically detects and processes grouped media (albums) as single units
 - **Database Integration**: SQLite database tracks all downloads and prevents duplicates (v0.4.0)
 - Concurrent processing: Downloads up to 5 media files simultaneously for faster performance
-- Files are permanently stored in organized directories (by message ID and timestamp)
-- **Smart Directory Structure**: Media groups stored in `mediagroup_{id}_{timestamp}` directories
+- Files are permanently stored in user-organized directories with custom folder structures (v0.5.0)
+- **Smart Directory Structure**: User-controlled organization with live folder statistics (v0.5.0)
 - **Duplicate Prevention**: Database-driven checks prevent re-downloading existing files (v0.4.0)
 - Smart file naming includes message ID and timestamp
 
 ### User Experience Features
+- **Interactive Folder Selection**: Choose download location with intuitive commands (v0.5.0)
+  - Browse existing folders with live media statistics
+  - Create new folders on-the-fly during selection process
+  - Navigate folder hierarchy with simple commands (`/cd`, `/cd..`, `/cr`, `/ok`)
+  - Visual feedback showing current location and available folders
 - Real-time progress updates every 5 seconds with:
   - Completed/failed file counts
   - Download speed (MB/s)
@@ -164,7 +182,8 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - Non-blocking progress updates that don't interrupt download speed
 
 ### Technical Implementation
-- **Modular Design**: Refactored from monolithic 596-line file into 3 specialized modules
+- **Modular Design**: Refactored from monolithic 596-line file into 5 specialized modules (v0.5.0)
+- **Interactive Navigation Architecture**: Dedicated folder navigation system with state management (v0.5.0)
 - **Media Group Architecture**: Intelligent collection and processing of grouped media
 - **Database Architecture**: SQLite integration for persistent download tracking and metadata (v0.4.0)
 - **Asyncio-based Architecture**: Concurrent processing for maximum performance
@@ -172,23 +191,27 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - **Background Monitoring**: Separate thread for real-time statistics without blocking downloads
 - **Progress Persistence**: JSON-based progress tracking for resume capability
 - **Optimized Client**: Telethon client with connection pooling and retry logic
-- **Clean Separation**: Bot orchestration, download operations, and monitoring are decoupled
+- **Clean Separation**: Bot orchestration, download operations, monitoring, and folder navigation are decoupled
 - **Dual API Integration**: Smart handling of Bot API and Telethon API differences
 - **Database Integration**: Comprehensive download history and duplicate detection system (v0.4.0)
+- **User State Management**: Per-user navigation state with session isolation (v0.5.0)
 - **Logging**: Configured for debugging (INFO level) with reduced third-party verbosity
 
 ### Performance Improvements
 - **5x faster downloads** through concurrent processing vs. sequential
-- **Improved Code Maintainability**: 3 focused modules vs. 1 monolithic file
+- **Improved Code Maintainability**: 5 focused modules vs. 1 monolithic file (v0.5.0)
 - **Better Testing**: Individual components can be tested independently
 - **Enhanced Debugging**: Clear separation of concerns for easier troubleshooting
+- **Optimized User Experience**: Interactive folder selection improves organization efficiency (v0.5.0)
 - Exponential backoff retry mechanism for network reliability  
 - Smart resource management prevents UI blocking during intensive operations
 - Memory-efficient progress tracking with callback-based updates
+- **Streamlined Workflow**: Integrated folder navigation reduces setup time (v0.5.0)
 
 ### Refactoring Benefits
-- **Code Organization**: Transformed 596-line monolithic file into clean modular architecture
+- **Code Organization**: Transformed 596-line monolithic file into clean 5-module architecture (v0.5.0)
 - **Single Responsibility**: Each module focuses on one primary concern
 - **Reusability**: Components can be easily reused or replaced
 - **Scalability**: New features can be added without affecting existing modules
 - **Maintainability**: Easier to understand, debug, and extend individual components
+- **Enhanced Modularity**: Folder navigation system demonstrates continued architectural evolution (v0.5.0)
