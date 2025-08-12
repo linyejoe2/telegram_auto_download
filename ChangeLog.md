@@ -1,5 +1,7 @@
 # ChangeLog
 
+## 0.5.1.0811-0155 Refactor bot.py
+
 ## 0.5.0.0811-1135 Interactive Folder Navigation
 
 ### feature
