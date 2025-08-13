@@ -41,11 +41,11 @@ def create_icon_file():
         ico_path = os.path.join('assets', 'icon.ico')
         images[0].save(ico_path, format='ICO', sizes=icon_sizes, append_images=images[1:])
         
-        print(f"✅ Icon file created: {ico_path}")
+        print(f"Icon file created: {ico_path}")
         return True
         
     except Exception as e:
-        print(f"❌ Failed to create icon: {e}")
+        print(f"Failed to create icon: {e}")
         return False
 
 if __name__ == "__main__":

@@ -57,10 +57,10 @@ def create_version_info():
     try:
         with open('version_info.txt', 'w', encoding='utf-8') as f:
             f.write(version_info.strip())
-        print("✅ Version info file created successfully")
+        print("Version info file created successfully")
         return True
     except Exception as e:
-        print(f"❌ Failed to create version info: {e}")
+        print(f"Failed to create version info: {e}")
         return False
 
 if __name__ == "__main__":
