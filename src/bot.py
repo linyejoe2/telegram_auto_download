@@ -1,7 +1,9 @@
 import asyncio
 import os
+import sys
 import logging
 import time
+import queue
 from telethon import TelegramClient
 from telethon.errors import RPCError
 from telegram import Update
@@ -12,10 +14,44 @@ from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
 
 # 設定日誌
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+log_queue = queue.Queue()
+class QueueHandler(logging.Handler):
+    def __init__(self, log_queue):
+        super().__init__()
+        self.log_queue = log_queue
+    
+    def emit(self, record):
+        self.log_queue.put(self.format(record))
+# Create logs directory
+log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+
+# Configure file logging
+log_file = os.path.join(log_dir, 'bot.log')
+
+# Configure root logger with GUI-friendly settings
+try:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            QueueHandler(log_queue)
+        ],
+        force=True  # Force reconfiguration if already configured
+    )
+except Exception as e:
+    # Fallback logging configuration for GUI environments
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        filename=log_file,
+        filemode='a',
+        encoding='utf-8'
+    )
+    # Add queue handler separately
+    root_logger = logging.getLogger()
+    root_logger.addHandler(QueueHandler(log_queue))
 logger = logging.getLogger(__name__)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telethon.client.updates').setLevel(logging.WARNING)
@@ -29,7 +65,7 @@ class TelegramMediaBot:
         self.media_groups = {}
         self.group_timers = {}
 
-        # Telethon client
+        # Telethon client with GUI-friendly settings
         self.client = TelegramClient(
             'bot_session',
             api_id,
@@ -38,6 +74,11 @@ class TelegramMediaBot:
             retry_delay=1,
             auto_reconnect=True,
             timeout=30,
+            # system_version="4.16.30-vxCUSTOM",  # Custom version to avoid issues
+            device_model="Desktop",
+            app_version="0.5.1",
+            lang_code="en",
+            system_lang_code="en"
         )
 
         # event loop
@@ -46,7 +87,12 @@ class TelegramMediaBot:
         # components
         base_dir = os.path.dirname(os.path.dirname(__file__))
         db_path = os.path.join(base_dir, 'downloads.db')
-        downloads_path = os.path.join(base_dir, 'downloads')
+        
+        # Get downloads path from environment or use default
+        from dotenv import load_dotenv
+        load_dotenv()
+        downloads_path = os.getenv('DOWNLOADS_PATH', os.path.join(base_dir, 'downloads'))
+        self.downloads_path = downloads_path
 
         self.monitor = DownloadMonitor(self.loop)
         self.downloader = MediaDownloader(self.client, max_concurrent_downloads=5, db_path=db_path)
@@ -61,9 +107,85 @@ class TelegramMediaBot:
         self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
 
     # ---------------------- startup ----------------------
-    async def start_client(self):
-        await self.client.start(phone=self.phone_number)
-        logger.info('Telegram Client 已啟動')
+    async def start_client(self, gui_root=None):
+        try:
+            # Check if client is already connected
+            if self.client.is_connected():
+                logger.info('Telegram Client 已經連接')
+                return
+            
+            # Check if session file exists
+            session_file = 'bot_session.session'
+            session_exists = os.path.exists(session_file)
+            
+            if session_exists:
+                logger.info('發現現有會話文件，嘗試自動登入...')
+                try:
+                    # Import auth helper to get proper handlers
+                    from .auth_helper import get_auth_helper
+                    auth_helper = get_auth_helper(gui_root)
+                    
+                    # Try to start with existing session but with proper handlers for fallback
+                    await self.client.start(
+                        phone=self.phone_number,
+                        code_callback=auth_helper.phone_code_callback,
+                        password=auth_helper.password_callback
+                    )
+                    logger.info('Telegram Client 已啟動（使用現有會話）')
+                    return
+                except EOFError as e:
+                    logger.warning(f'會話需要額外驗證但GUI不可用: {e}')
+                    logger.warning('將刪除會話文件並重新認證')
+                    # Remove session file that needs interactive input
+                    try:
+                        os.remove(session_file)
+                        logger.info('已刪除需要互動認證的會話文件')
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning(f'使用現有會話失敗，將重新認證: {e}')
+                    # Remove invalid session file
+                    try:
+                        os.remove(session_file)
+                        logger.info('已刪除無效的會話文件')
+                    except Exception:
+                        pass
+            
+            # Need authentication - import auth helper
+            logger.info('需要進行認證...')
+            from .auth_helper import authenticate_client, get_auth_helper
+            
+            # Get appropriate auth helper for environment
+            auth_helper = get_auth_helper(gui_root)
+            
+            # Handle authentication based on environment
+            if hasattr(sys, 'frozen'):  # Running in PyInstaller GUI
+                logger.info('GUI模式：使用圖形界面進行認證')
+                success = await authenticate_client(self.client, self.phone_number, auth_helper)
+                if not success:
+                    raise Exception("GUI authentication failed")
+            else:
+                # Development mode - try GUI first, fallback to console
+                try:
+                    success = await authenticate_client(self.client, self.phone_number, auth_helper)
+                    if not success:
+                        raise Exception("Authentication failed")
+                except Exception as e:
+                    logger.warning(f"GUI authentication failed, trying direct method: {e}")
+                    await self.client.start(phone=self.phone_number)
+            
+            logger.info('Telegram Client 已啟動（新認證）')
+            
+        except EOFError as e:
+            logger.error(f'認證失敗 - 輸入錯誤: {e}')
+            logger.error('這通常表示需要重新認證或在控制台模式下首次設定')
+            raise Exception("Authentication requires interactive input. Please run in console mode first or check session file.")
+        except Exception as e:
+            logger.error(f'Telegram Client 啟動失敗: {e}')
+            # Check if it's an authentication issue
+            if "phone" in str(e).lower() or "auth" in str(e).lower() or "eof" in str(e).lower():
+                logger.error('認證問題：請檢查手機號碼和API憑證，或刪除 bot_session.session 文件重新認證')
+            raise
 
     # ---------------------- helpers ----------------------
     async def get_message_and_replies(self, chat_id, message_id):
@@ -241,6 +363,8 @@ class TelegramMediaBot:
                 '• /ok - 確認當前位置並開始下載'
             )
             return
+        
+        logger.info(f'收到新請求')
 
         # media group aggregator
         if msg.media_group_id:
@@ -424,6 +548,12 @@ class TelegramMediaBot:
 
     def get_recent_downloads(self, limit=10):
         return self.downloader.get_recent_downloads(limit)
+    
+    def update_downloads_path(self, new_path):
+        """Update the downloads path and reinitialize folder navigator"""
+        self.downloads_path = new_path
+        self.folder_navigator = FolderNavigator(base_path=new_path)
+        os.makedirs(new_path, exist_ok=True)
 
     async def run(self):
         try:

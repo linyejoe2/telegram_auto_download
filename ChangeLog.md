@@ -1,5 +1,54 @@
 # ChangeLog
 
+## 1.0.0.0813 Major Release - GUI Application & Windows Installer
+
+### feature
+
++ **Professional GUI Application** - Complete Windows desktop application
+  + Intuitive graphical interface with tabbed layout (Configuration, Logs, Control)
+  + Real-time log viewing with scrollable display and save functionality
+  + System tray integration for background operation and minimize-to-tray
+  + Visual bot status indicators (Running/Stopped) with color coding
+  + Easy configuration management with browse dialogs and secure input fields
+  + Auto-saving configuration to .env file with instant validation
+
++ **Windows Installer Package** - Professional deployment solution
+  + One-click installer creation with `package_windows.bat` script
+  + Complete build automation with PyInstaller and Inno Setup integration
+  + Professional installer with Start Menu shortcuts and desktop icons
+  + Auto-upgrade capability for seamless version updates
+  + No Python installation required on target systems
+  + Single executable with all dependencies bundled (~150-300 MB)
+
++ **Enhanced Authentication System** - Robust session management for GUI environments
+  + Smart session file validation to skip authentication when valid session exists
+  + GUI authentication dialogs with tkinter for user-friendly credential input
+  + Automatic cleanup of invalid session files with fallback authentication
+  + Support for both GUI and console authentication modes
+
++ **Streamlined Documentation** - Consolidated and optimized project documentation
+  + Integrated multiple README files into single comprehensive guide
+  + Dedicated BUILD_GUIDE.md for Windows installer creation
+  + Clear user paths for Windows installer vs. command-line usage
+  + Reduced documentation size by ~75% while preserving essential information
+
+### improve
+
++ Complete transformation from command-line only to dual-interface application
++ Professional user experience with modern GUI design patterns
++ Simplified deployment through automated installer creation
++ Enhanced accessibility for non-technical users
++ Better error handling and user feedback in GUI environment
+
+### technical
+
++ Added `ui.py` - Main GUI application with tkinter interface
++ Added `run_gui.py` - GUI launcher script
++ Added `src/auth_helper.py` - GUI/console authentication helper
++ Added Windows packaging scripts (`package_windows.bat`, `build_windows.bat`, etc.)
++ Added PyInstaller configuration (`telegram_bot.spec`)
++ Added Inno Setup installer configuration (`installer.iss`)
+
 ## 0.5.1.0811-0155 Refactor bot.py
 
 ## 0.5.0.0811-1135 Interactive Folder Navigation

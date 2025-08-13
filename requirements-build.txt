@@ -1,0 +1,9 @@
+# Build-time dependencies for creating Windows installer
+# These are only needed for building, not for running the application
+
+pyinstaller>=5.13.0
+setuptools>=68.0.0
+wheel>=0.41.0
+
+# Runtime dependencies (also needed for build)
+-r requirements.txt

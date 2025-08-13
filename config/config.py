@@ -9,6 +9,7 @@ API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 PHONE_NUMBER = os.getenv('PHONE_NUMBER')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH')
 
 # Validate required environment variables
 def validate_config():
@@ -34,7 +35,7 @@ def validate_config():
     return True
 
 # File and Directory Configuration
-DOWNLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'downloads')
+DOWNLOADS_DIR = DOWNLOADS_PATH or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'downloads')
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 
 # Bot Configuration

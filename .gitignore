@@ -29,7 +29,8 @@ MANIFEST
 
 # PyInstaller
 *.manifest
-*.spec
+# Keep our custom spec file
+# *.spec
 
 # Installer logs
 pip-log.txt
@@ -157,3 +158,90 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 downloads.db
+
+# Windows Build System
+# ====================
+
+# Build output directories
+build/
+dist/
+installer_output/
+
+# Build environment
+build_env/
+.build_env/
+
+# Build artifacts
+version_info.txt
+assets/
+*.ico
+
+# Windows installer files
+*.exe
+*.msi
+
+# Build dependencies (keep requirements files)
+# requirements-build.txt is tracked
+
+# Temporary build files
+*.tmp
+*.temp
+build_*.log
+installer_*.log
+
+# Code signing certificates (if used)
+*.pfx
+*.p12
+*.cer
+
+# Chocolatey packages (if using choco)
+chocolatey/
+
+# Visual Studio build files
+*.vcxproj*
+*.sln
+*.suo
+*.user
+
+# Development and Debug
+# =====================
+
+# Debug output files
+debug.log
+debug_*.log
+trace.log
+
+# Test builds
+test_build/
+test_dist/
+
+# Backup files created during build
+*.bak
+*.backup
+*.orig
+
+# PyInstaller work files
+*.toc
+*.pyz
+*.manifest
+pyi-*.egg-info/
+
+# Compiled Python files in build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment variants
+venv*/
+env*/
+.venv*/
+.env*/
+python-env/
+py-env/
+
+# Build System Summary
+# ===================
+# Keep in repo: *.bat, *.py, *.spec, *.iss, *.md, requirements*.txt
+# Ignore: build/, dist/, installer_output/, build_env/, assets/, *.exe, *.ico
+# This allows source files to be tracked while ignoring generated artifacts
