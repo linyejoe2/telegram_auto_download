@@ -25,10 +25,10 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
+# MANIFEST
 
 # PyInstaller
-*.manifest
+# *.manifest
 # Keep our custom spec file
 # *.spec
 
@@ -223,7 +223,7 @@ test_dist/
 # PyInstaller work files
 *.toc
 *.pyz
-*.manifest
+# *.manifest
 pyi-*.egg-info/
 
 # Compiled Python files in build
