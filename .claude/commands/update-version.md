@@ -1,0 +1,1 @@
+Update versoin $ARGUMENTS to @app.manifest @installer.iss @package_windows.bat

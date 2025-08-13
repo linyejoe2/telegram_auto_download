@@ -3,8 +3,8 @@
 ; Do not use the same AppId value in installers for other applications.
 AppId={{A5B3C2D1-E4F6-4A7B-8C9D-1E2F3A4B5C6D}
 AppName=Telegram Auto Download Bot
-AppVersion=0.5.1
-AppVerName=Telegram Auto Download Bot v0.5.1
+AppVersion=1.0.7
+AppVerName=Telegram Auto Download Bot v1.0.7
 AppPublisher=Telegram Auto Download Bot
 AppPublisherURL=https://github.com/your-repo/telegram_auto_download
 AppSupportURL=https://github.com/your-repo/telegram_auto_download/issues
@@ -14,7 +14,7 @@ DisableProgramGroupPage=yes
 ; Remove the following line to run in administrative install mode (install for all users)
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=TelegramAutoDownload-Setup-v0.5.1
+OutputBaseFilename=TelegramAutoDownload-Setup-v1.0.7
 SetupIconFile=assets\icon.ico
 Compression=lzma
 SolidCompression=yes

@@ -76,7 +76,7 @@ class TelegramMediaBot:
             timeout=30,
             # system_version="4.16.30-vxCUSTOM",  # Custom version to avoid issues
             device_model="Desktop",
-            app_version="0.5.1",
+            # app_version="0.5.1",
             lang_code="en",
             system_lang_code="en"
         )
