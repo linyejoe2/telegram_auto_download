@@ -38,9 +38,9 @@ jobs:
         
     - name: Verify build artifacts
       run: |
-        if (Test-Path "dist\TelegramAutoDownload-*.exe") {
+        if (Test-Path "installer_output\TelegramAutoDownload-*.exe") {
           Write-Output "Installer created successfully"
-          Get-ChildItem "dist\TelegramAutoDownload-*.exe"
+          Get-ChildItem "installer_output\TelegramAutoDownload-*.exe"
         } else {
           Write-Error "Installer not found"
           exit 1
