@@ -1,5 +1,11 @@
 # ChangeLog
 
+## 1.1.0.0813-1403 Release Porject
+
+### feature
+
++ **CI/CD Pipeline For Release Porject** - Add GitHub Actions deployment
+
 ## 1.0.0.0813 Major Release - GUI Application & Windows Installer
 
 ### feature

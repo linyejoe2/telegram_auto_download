@@ -74,13 +74,3 @@ jobs:
         asset_path: installer_output/TelegramAutoDownload-Setup-${{ steps.version.outputs.VERSION }}.exe
         asset_name: TelegramAutoDownload-${{ steps.version.outputs.VERSION }}.exe
         asset_content_type: application/x-msdownload
-        
-    - name: Upload Build Guide
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: BUILD_GUIDE.md
-        asset_name: BUILD_GUIDE.md
-        asset_content_type: text/markdown
