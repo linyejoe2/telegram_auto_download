@@ -1,5 +1,7 @@
 # ChangeLog
 
+## 1.2.0.0814-1118 download start from smallest file
+
 ## 1.1.1.0814-1019 show skip file
 
 + Showing skip file to frontend.

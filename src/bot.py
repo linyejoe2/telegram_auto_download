@@ -506,7 +506,7 @@ class TelegramMediaBot:
             total_size = 0
             for m in messages_to_download:
                 if getattr(m, 'media', None):
-                    total_size += await self.downloader.get_media_size(m)
+                    total_size += self.downloader.get_media_size(m)
 
             total_size_mb = total_size / (1024**2)
             await processing_msg.edit_text(f'🚀 開始下載 {len(messages_to_download)} 個媒體文件，總大小: {total_size_mb:.1f}MB...')

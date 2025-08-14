@@ -151,7 +151,7 @@ if "%INNO_SETUP_PATH%"=="" (
     if not exist "installer_output" mkdir installer_output
     "%INNO_SETUP_PATH%" installer.iss
     
-    if exist "installer_output\TelegramAutoDownload-Setup-v1.1.0.exe" (
+    if exist "installer_output\TelegramAutoDownload-Setup-v1.2.0.exe" (
         echo Installer created successfully!
     ) else (
         echo Warning: Installer creation failed.
@@ -185,16 +185,16 @@ if "%ERROR_OCCURRED%"=="0" (
     echo.
     echo Created files:
     echo - Executable: dist\TelegramAutoDownload\TelegramAutoDownload.exe
-    if exist "installer_output\TelegramAutoDownload-Setup-v1.1.0.exe" (
-        echo - Installer: installer_output\TelegramAutoDownload-Setup-v1.1.0.exe
+    if exist "installer_output\TelegramAutoDownload-Setup-v1.2.0.exe" (
+        echo - Installer: installer_output\TelegramAutoDownload-Setup-v1.2.0.exe
     )
     echo.
     echo File sizes:
     if exist "dist\TelegramAutoDownload\TelegramAutoDownload.exe" (
         for %%A in ("dist\TelegramAutoDownload\TelegramAutoDownload.exe") do echo   Executable: %%~zA bytes
     )
-    if exist "installer_output\TelegramAutoDownload-Setup-v1.1.0.exe" (
-        for %%A in ("installer_output\TelegramAutoDownload-Setup-v1.1.0.exe") do echo   Installer: %%~zA bytes
+    if exist "installer_output\TelegramAutoDownload-Setup-v1.2.0.exe" (
+        for %%A in ("installer_output\TelegramAutoDownload-Setup-v1.2.0.exe") do echo   Installer: %%~zA bytes
     )
     echo.
     echo Distribution files are ready!

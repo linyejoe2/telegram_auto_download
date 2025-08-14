@@ -30,18 +30,21 @@ class MediaDownloader:
         """設定訊息回調函數，用於發送訊息給用戶"""
         self.message_callback = callback
     
-    async def get_media_size(self, message):
+    def get_media_size(self, message):
         """獲取媒體文件大小"""
         try:
             if not message.media:
                 return 0
+
+            if hasattr(message, 'file') and message.file and hasattr(message.file, 'size'):
+                return message.file.size
             
             if isinstance(message.media, MessageMediaPhoto):
                 # 照片大小通常較小，使用預估值
                 return message.media.photo.sizes[-1].size if hasattr(message.media.photo, 'sizes') else 500000  # 預估500KB
             
             elif isinstance(message.media, MessageMediaDocument):
-                return message.media.document.size
+                return message.media.document.size if hasattr(message.media.document, 'size') else 0
                 
         except Exception as e:
             logger.debug(f"獲取媒體大小時出錯: {e}")
@@ -238,8 +241,10 @@ class MediaDownloader:
         total_size = 0
         for message in messages_to_download:
             if message.media:
-                size = await self.get_media_size(message)
+                size = self.get_media_size(message)
                 total_size += size
+                
+        messages_to_download = sorted(messages_to_download, key=self.get_media_size)
         
         # 更新監控器統計
         if self.monitor:
@@ -320,8 +325,7 @@ class MediaDownloader:
             logger.debug(f"獲取文件唯一 ID 時出錯: {e}")
         return None
     
-    def _record_download_to_db(self, message, file_name, file_path, file_type, 
-                              download_dir, original_file_name=None, mime_type=None):
+    def _record_download_to_db(self, message, file_name, file_path, file_type, download_dir, original_file_name=None, mime_type=None):
         """記錄下載信息到資料庫"""
         try:
             file_unique_id = self._get_file_unique_id(message)
