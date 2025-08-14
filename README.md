@@ -1,83 +1,109 @@
 # Telegram Auto Download Bot v1.1.0
 
-A high-performance Telegram bot that automatically downloads and backs up media files from forwarded messages, media groups, and their replies. Features both command-line and GUI interfaces with interactive folder navigation and comprehensive download management.
+A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
-## ✨ Key Features
+---
 
-- **🖥️ Professional GUI**: Windows application with system tray integration, real-time logging, and easy configuration
-- **📦 Windows Installer**: One-click installation with professional setup - no Python required
-- **📁 Interactive Folder Navigation**: Choose download location with intuitive commands (`/cr`, `/cd`, `/ok`)
-- **🗃️ Database Integration**: SQLite database prevents duplicates and tracks download history
-- **📸 Media Group Support**: Automatically processes grouped media (albums) as single units
-- **⚡ High Performance**: Up to 5 concurrent downloads with real-time progress monitoring
+## ✨ Features
 
-## Quick Start
+- **🖥️ GUI Application**  
+  Windows desktop app with system tray, real-time logs, and easy configuration.
 
-### Windows Installer
+- **📦 Windows Installer**  
+  One-click setup — no Python required. Professional packaging with auto-updates.
 
-1. **Download**: Get `TelegramAutoDownload-Setup-v1.1.0.exe` from releases
-2. **Install**: Run installer (no Python required)
-3. **Configure**: Launch GUI, set API credentials in Configuration tab
-4. **Run**: Start bot and minimize to system tray
+- **📁 Folder Navigation**  
+  Interactive commands (`/cr`, `/cd`, `/ok`) to choose download location.
 
-### Build From Source
+- **🗃️ SQLite Database**  
+  Tracks download history and prevents duplicates.
+
+- **📸 Media Group Support**  
+  Automatically handles albums and grouped media.
+
+- **⚡ High Performance**  
+  Concurrent downloads (up to 5), real-time metrics, and progress display.
+
+---
+
+## 🚀 Quick Start
+
+### ✅ Recommended: Windows Installer
+
+1. **Download** `TelegramAutoDownload-Setup-v1.1.0.exe` from Releases  
+2. **Install** — No Python required  
+3. **Launch** the app, configure API credentials in GUI  
+4. **Run** the bot (minimizes to system tray)
+
+---
+
+### 🧰 Build From Source
 
 ```bash
-# 1. Clone and install
+# 1. Clone & Install
 git clone <repository-url>
 cd telegram_auto_download
 pip install -r requirements.txt
 
-# 2. Configure
-# Create .env file with your credentials
+# 2. Configure (.env file)
 API_ID=your_api_id
 API_HASH=your_api_hash
-PHONE_NUMBER=your_phone_number
+PHONE_NUMBER=+1234567890
 BOT_TOKEN=your_bot_token
 
 # 3. Run
-python main.py          # Command line
-python run_gui.py       # GUI (Windows)
+python main.py       # CLI
+python run_gui.py    # GUI (Windows)
 ```
 
-## Getting API Credentials
+### 🏗️ Building Windows Installer
 
-1. **API ID/Hash**: Visit <https://my.telegram.org/apps> → Create app → Copy credentials
-2. **Bot Token**: Message @BotFather → `/newbot` → Copy token
-3. **Phone**: Your Telegram number with country code (e.g., +1234567890)
+You can build a standalone Windows installer (.exe) that bundles the bot and all its dependencies—no Python installation needed on the target machine.
 
-## Usage
+#### ✅ Requirements
 
-Forward any media message to your bot, then:
+Install the following on your Windows system:
 
-- `/cr <name>` - Create folder
-- `/cd <name>` - Enter folder  
-- `/cd..` - Go back
-- `/ok` - Start download
+1. Python 3.8+ (64-bit recommended)
+    - Download: <https://www.python.org/downloads/>
+    - Make sure to check "Add Python to PATH" during installation.
 
-Progress updates show speed, completion, and storage location.
+2. Inno Setup 6.x
+    - Download: <https://jrsoftware.org/isdl.php>
+    - Install and ensure ISCC.exe is available in your system PATH.
 
-## Windows Installer (Recommended for End Users)
+3. PyInstaller
+    - Install via pip: `pip install pyinstaller`
 
-### Build Package
+#### 🛠️ Build Steps
 
-```batch
-package_windows.bat  # Complete build process
+Run: `package_windows.bat`
+
+> This script performs the following:
+>
+> - Runs PyInstaller using telegram_bot.spec
+> - Generates a standalone EXE in /dist
+> - Calls Inno Setup to generate the final installer .exe
+
+## 🔐 API Credentials
+
+- API ID & Hash: my.telegram.org/apps → Create App
+- Bot Token: Message @BotFather → /newbot
+- Phone Number: Your full number with country code (e.g., +1234567890)
+
+## 📦 Folder Commands
+
+Forward any media to the bot, then use:
+
+```
+/cr <name>    # Create folder
+/cd <name>    # Enter folder
+/cd..         # Go up
+/ok           # Start download
 ```
 
-**Output**: Professional Windows installer (`TelegramAutoDownload-Setup-v1.1.0.exe`) with:
+## 📄 License & Disclaimer
 
-- Single-click installation (no Python required)
-- GUI application with system tray integration  
-- Start menu shortcuts and desktop shortcut options
-- Auto-upgrade capability for future versions
-
-### Requirements for Building
-
-- Python 3.8+
-- Inno Setup 6.x (for installer creation)
-- Windows 10/11
-
-## License & Disclaimer
-
-MIT License. For educational and personal backup use only. Respect Telegram's Terms of Service and copyright laws.
+MIT License.
+For educational/personal backup use only.
+You must comply with Telegram’s Terms of Service.
