@@ -11,6 +11,10 @@ echo.
 set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
+REM ===== Version constant =====
+set "APP_VERSION=1.3.0"
+REM ============================
+
 REM Check Python installation
 echo [1/10] Checking Python installation...
 python --version >nul 2>&1
@@ -151,7 +155,7 @@ if "%INNO_SETUP_PATH%"=="" (
     if not exist "installer_output" mkdir installer_output
     "%INNO_SETUP_PATH%" installer.iss
     
-    if exist "installer_output\TelegramAutoDownload-Setup-v1.2.0.exe" (
+    if exist "installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe" (
         echo Installer created successfully!
     ) else (
         echo Warning: Installer creation failed.
@@ -165,17 +169,6 @@ echo Build ended at: %END_TIME%
 echo.
 pause
 
-REM Function to display errors
-:display_error
-echo.
-echo ====================================
-echo ERROR OCCURRED!
-echo ====================================
-echo %~1
-echo.
-set "ERROR_OCCURRED=1"
-pause
-
 :end
 echo.
 echo ====================================
@@ -185,16 +178,16 @@ if "%ERROR_OCCURRED%"=="0" (
     echo.
     echo Created files:
     echo - Executable: dist\TelegramAutoDownload\TelegramAutoDownload.exe
-    if exist "installer_output\TelegramAutoDownload-Setup-v1.2.0.exe" (
-        echo - Installer: installer_output\TelegramAutoDownload-Setup-v1.2.0.exe
+    if exist "installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe" (
+        echo - Installer: installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe
     )
     echo.
     echo File sizes:
     if exist "dist\TelegramAutoDownload\TelegramAutoDownload.exe" (
         for %%A in ("dist\TelegramAutoDownload\TelegramAutoDownload.exe") do echo   Executable: %%~zA bytes
     )
-    if exist "installer_output\TelegramAutoDownload-Setup-v1.2.0.exe" (
-        for %%A in ("installer_output\TelegramAutoDownload-Setup-v1.2.0.exe") do echo   Installer: %%~zA bytes
+    if exist "installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe" (
+        for %%A in ("installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe") do echo   Installer: %%~zA bytes
     )
     echo.
     echo Distribution files are ready!

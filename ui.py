@@ -18,7 +18,7 @@ from config.config import validate_config
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v1.2.0"
+        self.version = "v1.3.0"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x600")

@@ -1,0 +1,43 @@
+[tool.bumpversion]
+current_version = "1.3.0"
+commit = false
+
+[[tool.bumpversion.files]]
+filename = "src/__init__.py"
+search = "__version__ = \"{current_version}\""
+replace = "__version__ = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "app.manifest"
+search = "version=\"{current_version}.0\""
+replace = "version=\"{new_version}.0\""
+
+[[tool.bumpversion.files]]
+filename = "installer.iss"
+search = "AppVersion={current_version}"
+replace = "AppVersion={new_version}"
+
+[[tool.bumpversion.files]]
+filename = "installer.iss"
+search = "AppVerName=Telegram Auto Download Bot v{current_version}"
+replace = "AppVerName=Telegram Auto Download Bot v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "installer.iss"
+search = "OutputBaseFilename=TelegramAutoDownload-Setup-v{current_version}"
+replace = "OutputBaseFilename=TelegramAutoDownload-Setup-v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "package_windows.bat"
+search = "set \"APP_VERSION={current_version}\""
+replace = "set \"APP_VERSION={new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "create_version_info.py"
+search = "APP_VERSION = \"{current_version}\""
+replace = "APP_VERSION = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "ui.py"
+search = "self.version = \"v{current_version}\""
+replace = "self.version = \"v{new_version}\""
