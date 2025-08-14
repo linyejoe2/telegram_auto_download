@@ -9,6 +9,7 @@
       "Bash(del BUILD_WINDOWS.md GUI_README.md PACKAGE_README.md)",
       "Bash(rm:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

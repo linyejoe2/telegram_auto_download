@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v1.1.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, interactive folder navigation, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v1.3.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, interactive folder navigation, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -29,6 +29,25 @@ package_windows.bat
 
 ```bash
 pip install -r requirements.txt
+```
+
+### Version Management
+
+```bash
+# Bump version (minor increment)
+bump_version.bat
+
+# Or use bump2version directly
+bump2version minor
+bump2version patch
+bump2version major
+```
+
+### Build Environment Setup
+
+```bash
+# Setup build environment for Windows packaging
+setup_build_env.bat
 ```
 
 ## Architecture
@@ -70,6 +89,7 @@ pip install -r requirements.txt
    - **PyInstaller Integration**: Single executable with all dependencies bundled
    - **Inno Setup**: Professional installer with shortcuts and auto-upgrade support
    - **Build Automation**: Complete build pipeline from source to installer
+   - **CI/CD Integration**: GitHub Actions for automated deployment (v1.1.0)
 
 4. **Async/Await Pattern**: All operations are asynchronous using Python's asyncio
 
@@ -166,10 +186,14 @@ telegram_auto_download/
 ├── run_gui.py                  # GUI launcher script (v1.0.0)
 ├── main.py                     # Command-line application entry point
 ├── package_windows.bat         # Windows installer build script (v1.0.0)
+├── setup_build_env.bat         # Build environment setup script
+├── bump_version.bat            # Version bumping script
 ├── telegram_bot.spec           # PyInstaller configuration (v1.0.0)
 ├── installer.iss               # Inno Setup installer configuration (v1.0.0)
 ├── create_version_info.py      # Version info generator (v1.0.0)
 ├── create_icon.py              # Application icon generator (v1.0.0)
+├── pyproject.toml              # Project configuration and version management
+├── ChangeLog.md                # Version history and release notes
 ├── downloads/                  # User-organized backup directory with folder structure
 ├── logs/                       # Log files directory (auto-created)
 ├── downloads.db                # SQLite database for download history
@@ -190,10 +214,12 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 ### Performance & Optimization Features
 
 - **Concurrent Downloads**: Up to 5 simultaneous downloads using asyncio.Semaphore
+- **Download Optimization**: Downloads start from smallest files for faster perceived performance (v1.2.0)
 - **Optimized Telethon Client**: Connection pooling, retries, and timeout configuration
 - **Real-time Monitoring**: Background thread tracking download progress, speed, and disk usage
 - **Progress Callbacks**: Live download progress tracking with speed calculations
 - **Smart Resource Management**: Non-blocking UI updates and memory-efficient operations
+- **Skipped File Visibility**: Skipped files are now visible in the frontend (v1.1.1)
 
 ### Error Handling & Reliability
 
