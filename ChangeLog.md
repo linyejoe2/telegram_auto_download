@@ -1,5 +1,9 @@
 # ChangeLog
 
+## 1.1.1.0814-1019 show skip file
+
++ Showing skip file to frontend.
+
 ## 1.1.0.0813-1403 Release Porject
 
 ### feature

@@ -511,6 +511,14 @@ class TelegramMediaBot:
             total_size_mb = total_size / (1024**2)
             await processing_msg.edit_text(f'🚀 開始下載 {len(messages_to_download)} 個媒體文件，總大小: {total_size_mb:.1f}MB...')
 
+            # 設定訊息回調函數，讓下載器可以發送新訊息
+            async def send_message_to_user(text):
+                try:
+                    await processing_msg.reply_text(text)
+                except Exception as e:
+                    logger.warning(f"發送訊息失敗: {e}")
+            
+            self.downloader.set_message_callback(send_message_to_user)
             all_files = await self.downloader.download_multiple_messages_concurrent(messages_to_download, download_dir)
 
         finally:

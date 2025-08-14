@@ -5,6 +5,7 @@ import time
 import json
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 from telethon.errors import FloodWaitError, RPCError
+from telethon import TelegramClient
 from .database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -13,16 +14,21 @@ logger = logging.getLogger(__name__)
 class MediaDownloader:
     """處理媒體文件下載的類"""
     
-    def __init__(self, client, max_concurrent_downloads=5, db_path="downloads.db"):
+    def __init__(self, client: TelegramClient, max_concurrent_downloads=5, db_path="downloads.db"):
         self.client = client
         self.max_concurrent_downloads = max_concurrent_downloads
         self.download_semaphore = asyncio.Semaphore(max_concurrent_downloads)
         self.monitor = None
         self.db = DatabaseManager(db_path)
+        self.message_callback = None
     
     def set_monitor(self, monitor):
         """設定監控器"""
         self.monitor = monitor
+    
+    def set_message_callback(self, callback):
+        """設定訊息回調函數，用於發送訊息給用戶"""
+        self.message_callback = callback
     
     async def get_media_size(self, message):
         """獲取媒體文件大小"""
@@ -218,6 +224,12 @@ class MediaDownloader:
         
         if skipped_count > 0:
             logger.info(f"跳過 {skipped_count} 個已下載的文件")
+            # 發送訊息到 Telegram
+            if self.message_callback:
+                try:
+                    await self.message_callback(f"⏭️ 跳過 {skipped_count} 個已下載的文件")
+                except Exception as e:
+                    logger.warning(f"發送跳過文件訊息失敗: {e}")
         
         # 統計總文件數和總大小
         total_media_count = len(messages_to_download)

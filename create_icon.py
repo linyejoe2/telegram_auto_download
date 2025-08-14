@@ -11,7 +11,7 @@ def create_tray_image():
     # Create a simple icon image
     width = 64
     height = 64
-    image = Image.new('RGB', (width, height), color='blue')
+    image = Image.new('RGB', (width, height), color="#1a1331")
     draw = ImageDraw.Draw(image)
     
     # Draw a simple "T" for Telegram
