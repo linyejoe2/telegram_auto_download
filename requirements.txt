@@ -4,3 +4,4 @@ asyncio-mqtt>=0.13.0
 python-dotenv>=1.0.0
 pystray>=0.19.4
 Pillow>=9.5.0
+bump2version>=1.0.1

@@ -11,5 +11,5 @@ from .bot import TelegramMediaBot
 from .downloader import MediaDownloader
 from .monitor import DownloadMonitor
 
-__version__ = "0.4.0"
+__version__ = "1.2.0"
 __all__ = ["TelegramMediaBot", "MediaDownloader", "DownloadMonitor"]

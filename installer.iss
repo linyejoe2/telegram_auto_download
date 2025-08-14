@@ -1,7 +1,7 @@
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
 ; Do not use the same AppId value in installers for other applications.
-AppId={{A5B3C2D1-E4F6-4A7B-8C9D-1E2F3A4B5C6D}
+AppId={{A5B3C2D1-E4F6-4A7B-8C9D-1E2F3A4B5C6D}}
 AppName=Telegram Auto Download Bot
 AppVersion=1.2.0
 AppVerName=Telegram Auto Download Bot v1.2.0

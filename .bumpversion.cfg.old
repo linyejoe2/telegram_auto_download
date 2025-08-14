@@ -1,0 +1,42 @@
+[bumpversion]
+current_version = 1.2.0
+commit = False
+tag = True
+tag_name = v{new_version}
+message = Bump version: {current_version} → {new_version}
+
+[bumpversion:file:src/__init__.py]
+search = __version__ = "{current_version}"
+replace = __version__ = "{new_version}"
+
+[bumpversion:file:app.manifest]
+search = version="{current_version}.0"
+replace = version="{new_version}.0"
+
+[bumpversion:file:installer.iss]
+search = AppVersion={current_version}
+replace = AppVersion={new_version}
+
+[bumpversion:file:installer.iss]
+search = AppVerName=Telegram Auto Download Bot v{current_version}
+replace = AppVerName=Telegram Auto Download Bot v{new_version}
+
+[bumpversion:file:installer.iss]
+search = OutputBaseFilename=TelegramAutoDownload-Setup-v{current_version}
+replace = OutputBaseFilename=TelegramAutoDownload-Setup-v{new_version}
+
+[bumpversion:file:package_windows.bat]
+search = installer_output\TelegramAutoDownload-Setup-v{current_version}.exe
+replace = installer_output\TelegramAutoDownload-Setup-v{new_version}.exe
+
+[bumpversion:file:create_version_info.py]
+search = filevers=(1, 2, 0, 0)
+replace = filevers=({new_version.replace('.', ', ')}, 0)
+
+[bumpversion:file:create_version_info.py]
+search = StringStruct(u'ProductVersion', u'1.2.0.0')
+replace = StringStruct(u'ProductVersion', u'{new_version}.0')
+
+[bumpversion:file:ui.py]
+search = self.version = "v{current_version}"
+replace = self.version = "v{new_version}"

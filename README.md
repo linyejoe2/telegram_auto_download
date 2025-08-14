@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v1.1.0
+# Telegram Auto Download Bot v1.2.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -30,7 +30,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v1.1.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v1.2.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)

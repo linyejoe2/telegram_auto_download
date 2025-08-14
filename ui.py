@@ -9,14 +9,18 @@ from dotenv import load_dotenv, set_key
 import pystray
 from PIL import Image, ImageDraw
 import asyncio
+import subprocess
+import platform
 from main import main as bot_main
 from src.bot import log_queue
+from src.database import DatabaseManager
 from config.config import validate_config
 
 class TelegramBotGUI:
     def __init__(self):
+        self.version = "v1.2.0"
         self.root = tk.Tk()
-        self.root.title("Telegram Auto Download Bot")
+        self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x600")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
@@ -54,8 +58,11 @@ class TelegramBotGUI:
         # Start log monitoring
         self.monitor_logs()
         
+        # Initialize database displays
+        self.root.after(500, self.init_database_displays)
+        
         # Auto-start bot if configuration is valid
-        self.auto_start_bot()
+        # self.auto_start_bot()
 
     def create_tray_image(self):
         """Create a simple icon for system tray"""
@@ -86,6 +93,11 @@ class TelegramBotGUI:
         log_frame = ttk.Frame(notebook)
         notebook.add(log_frame, text="Logs")
         self.setup_log_tab(log_frame)
+        
+        # Database tab
+        database_frame = ttk.Frame(notebook)
+        notebook.add(database_frame, text="Database")
+        self.setup_database_tab(database_frame)
 
     def setup_config_tab(self, parent):
         """Setup configuration tab with bot control at top"""
@@ -172,6 +184,113 @@ class TelegramBotGUI:
         
         ttk.Button(log_controls, text="Clear Logs", command=self.clear_logs).pack(side=tk.LEFT)
         ttk.Button(log_controls, text="Save Logs", command=self.save_logs).pack(side=tk.LEFT, padx=5)
+
+    def setup_database_tab(self, parent):
+        """Setup database tab"""
+        # Statistics section
+        stats_frame = ttk.LabelFrame(parent, text="Download Statistics", padding="10")
+        stats_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Main statistics display
+        main_stats_frame = ttk.Frame(stats_frame)
+        main_stats_frame.pack(fill=tk.X, pady=5)
+        
+        # Total files
+        ttk.Label(main_stats_frame, text="Total Files:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.total_files_label = ttk.Label(main_stats_frame, text="0", font=("Arial", 10, "bold"))
+        self.total_files_label.grid(row=0, column=1, sticky=tk.W, padx=5)
+        
+        # Total size
+        ttk.Label(main_stats_frame, text="Total Size:").grid(row=0, column=2, sticky=tk.W, padx=5)
+        self.total_size_label = ttk.Label(main_stats_frame, text="0 MB", font=("Arial", 10, "bold"))
+        self.total_size_label.grid(row=0, column=3, sticky=tk.W, padx=5)
+        
+        # Unique chats
+        ttk.Label(main_stats_frame, text="Unique Chats:").grid(row=0, column=4, sticky=tk.W, padx=5)
+        self.unique_chats_label = ttk.Label(main_stats_frame, text="0", font=("Arial", 10, "bold"))
+        self.unique_chats_label.grid(row=0, column=5, sticky=tk.W, padx=5)
+        
+        # File types section
+        file_types_frame = ttk.Frame(stats_frame)
+        file_types_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Label(file_types_frame, text="File Types:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
+        self.file_types_frame = ttk.Frame(file_types_frame)
+        self.file_types_frame.pack(fill=tk.X, pady=5)
+        
+        # Refresh stats button
+        ttk.Button(stats_frame, text="Refresh Statistics", command=self.refresh_statistics).pack(side=tk.LEFT, pady=5)
+        
+        # Recent downloads section
+        downloads_frame = ttk.LabelFrame(parent, text="Recent Downloads", padding="10")
+        downloads_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        tree_frame = tk.Frame(downloads_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        
+        # Create treeview for downloads list
+        self.columns = ("File Name", "Type", "Size", "Download Date", "Path")
+        self.downloads_tree = ttk.Treeview(tree_frame, columns=self.columns, show="headings")
+        
+        self.sort_order = {col: False for col in self.columns}
+        
+        # Configure column headings and widths
+        # self.downloads_tree.heading("File Name", text="File Name")
+        # self.downloads_tree.heading("Type", text="Type")
+        # self.downloads_tree.heading("Size", text="Size")
+        # self.downloads_tree.heading("Download Date", text="Download Date")
+        # self.downloads_tree.heading("Path", text="Path")
+        for col in self.columns:
+            self.downloads_tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
+        
+        self.downloads_tree.column("File Name", width=200)
+        self.downloads_tree.column("Type", width=80)
+        self.downloads_tree.column("Size", width=70)
+        self.downloads_tree.column("Download Date", width=120)
+        self.downloads_tree.column("Path", width=250)
+        
+        # Add scrollbar for treeview
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.downloads_tree.yview)
+        self.downloads_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack treeview and scrollbar
+        self.downloads_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Controls for downloads list
+        downloads_controls = ttk.Frame(downloads_frame)
+        downloads_controls.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(downloads_controls, text="Refresh Downloads", command=self.refresh_downloads).pack(side=tk.LEFT)
+        ttk.Button(downloads_controls, text="Open File Location", command=self.open_file_location).pack(side=tk.LEFT, padx=5)
+        
+    def sort_by_column(self, col):
+        # Get all rows
+        data = [(self.downloads_tree.set(child, col), child) for child in self.downloads_tree.get_children('')]
+
+        # Try to convert to float/int for size/date sorting, fallback to string
+        def try_cast(val):
+            try:
+                # Size handling for "1.5 MB", "230 KB", etc.
+                if col == "Size":
+                    num, unit = val.split()
+                    num = float(num)
+                    multiplier = {"B": 1, "KB": 1_000, "MB": 1_000_000, "GB": 1_000_000_000}
+                    return num * multiplier[unit]
+                elif col == "Download Date":
+                    return val  # Could use datetime.strptime if needed
+                return float(val)
+            except:
+                return val.lower()
+
+        # Sort data
+        data.sort(key=lambda x: try_cast(x[0]), reverse=self.sort_order[col])
+        self.sort_order[col] = not self.sort_order[col]
+
+        # Rearrange items in tree
+        for index, (_, iid) in enumerate(data):
+            self.downloads_tree.move(iid, '', index)
 
     def auto_start_bot(self):
         """Auto-start bot if configuration is valid and auto-start is enabled"""
@@ -378,6 +497,123 @@ class TelegramBotGUI:
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save logs: {str(e)}")
+
+    def refresh_statistics(self):
+        """Refresh download statistics"""
+        try:
+            db = DatabaseManager()
+            stats = db.get_download_statistics()
+            
+            # Update main statistics labels
+            self.total_files_label.config(text=str(stats.get('total_files', 0)))
+            total_size_mb = stats.get('total_size_mb', 0)
+            self.total_size_label.config(text=f"{total_size_mb:.1f} MB")
+            self.unique_chats_label.config(text=str(stats.get('unique_chats', 0)))
+            
+            # Clear existing file type labels
+            for widget in self.file_types_frame.winfo_children():
+                widget.destroy()
+            
+            # Add file type breakdown
+            type_stats = stats.get('files_by_type', {})
+            if type_stats:
+                row = 0
+                for file_type, count in type_stats.items():
+                    type_name = file_type or 'unknown'
+                    ttk.Label(self.file_types_frame, text=f"{type_name}:").grid(row=row, column=0, sticky=tk.W, padx=5)
+                    ttk.Label(self.file_types_frame, text=f"{count} files", font=("Arial", 9, "bold")).grid(row=row, column=1, sticky=tk.W, padx=5)
+                    row += 1
+            else:
+                ttk.Label(self.file_types_frame, text="No files downloaded yet", style="TLabel").pack(anchor=tk.W)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh statistics: {str(e)}")
+
+    def refresh_downloads(self):
+        """Refresh recent downloads list"""
+        try:
+            # Clear existing items
+            for item in self.downloads_tree.get_children():
+                self.downloads_tree.delete(item)
+            
+            # Get recent downloads
+            db = DatabaseManager()
+            downloads = db.get_recent_downloads(limit=100)  # Show last 100 downloads
+            
+            # Populate treeview
+            for download in downloads:
+                file_name = download.get('file_name', 'Unknown')
+                file_type = download.get('file_type', 'Unknown')
+                file_size = download.get('file_size', 0)
+                download_date = download.get('download_date', '')
+                file_path = download.get('file_path', '')
+                
+                # Format file size
+                if file_size:
+                    if file_size > 1024**2:
+                        size_str = f"{file_size/(1024**2):.1f} MB"
+                    elif file_size > 1024:
+                        size_str = f"{file_size/1024:.1f} KB"
+                    else:
+                        size_str = f"{file_size} B"
+                else:
+                    size_str = "Unknown"
+                
+                # Format date
+                if download_date:
+                    try:
+                        # Parse ISO format date
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(download_date.replace('Z', '+00:00'))
+                        date_str = dt.strftime("%Y-%m-%d %H:%M")
+                    except:
+                        date_str = str(download_date)[:16]  # Truncate if parsing fails
+                else:
+                    date_str = "Unknown"
+                
+                # Insert into treeview
+                self.downloads_tree.insert("", "end", values=(
+                    file_name, file_type, size_str, date_str, file_path
+                ))
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh downloads: {str(e)}")
+
+    def open_file_location(self):
+        """Open file location of selected download"""
+        try:
+            selection = self.downloads_tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select a file from the list.")
+                return
+            
+            # Get file path from selected item
+            item = self.downloads_tree.item(selection[0])
+            file_path = item['values'][4]  # Path is the 5th column (index 4)
+            
+            if not file_path or not os.path.exists(file_path):
+                messagebox.showerror("Error", "File not found or path is invalid.")
+                return
+            
+            # Open file location in file explorer
+            if platform.system() == "Windows":
+                subprocess.run(f'explorer /select,"{file_path}"')
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", "-R", file_path])
+            else:  # Linux
+                subprocess.run(["xdg-open", os.path.dirname(file_path)])
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open file location: {str(e)}")
+
+    def init_database_displays(self):
+        """Initialize database displays on startup"""
+        try:
+            self.refresh_statistics()
+            self.refresh_downloads()
+        except Exception as e:
+            # Don't show error dialog on startup, just log it
+            logging.error(f"Failed to initialize database displays: {e}")
 
     def setup_system_tray(self):
         """Setup system tray functionality"""
