@@ -1,303 +1,76 @@
 # ChangeLog
 
-## 1.2.0.0814-1118 download start from smallest file
+## 1.2.0.0814-1118
 
-## 1.1.1.0814-1019 show skip file
+- **Download Optimization**: Start download from the smallest file.
 
-+ Showing skip file to frontend.
-
-## 1.1.0.0813-1403 Release Porject
+## 1.1.1.0814-1019
 
-### feature
-
-+ **CI/CD Pipeline For Release Porject** - Add GitHub Actions deployment
-
-## 1.0.0.0813 Major Release - GUI Application & Windows Installer
-
-### feature
+- **Show Skipped Files**: Skipped files are now visible in the frontend.
 
-+ **Professional GUI Application** - Complete Windows desktop application
-  + Intuitive graphical interface with tabbed layout (Configuration, Logs, Control)
-  + Real-time log viewing with scrollable display and save functionality
-  + System tray integration for background operation and minimize-to-tray
-  + Visual bot status indicators (Running/Stopped) with color coding
-  + Easy configuration management with browse dialogs and secure input fields
-  + Auto-saving configuration to .env file with instant validation
+## 1.1.0.0813-1403
 
-+ **Windows Installer Package** - Professional deployment solution
-  + One-click installer creation with `package_windows.bat` script
-  + Complete build automation with PyInstaller and Inno Setup integration
-  + Professional installer with Start Menu shortcuts and desktop icons
-  + Auto-upgrade capability for seamless version updates
-  + No Python installation required on target systems
-  + Single executable with all dependencies bundled (~150-300 MB)
+- **CI/CD Integration**: GitHub Actions for automated deployment.
 
-+ **Enhanced Authentication System** - Robust session management for GUI environments
-  + Smart session file validation to skip authentication when valid session exists
-  + GUI authentication dialogs with tkinter for user-friendly credential input
-  + Automatic cleanup of invalid session files with fallback authentication
-  + Support for both GUI and console authentication modes
-
-+ **Streamlined Documentation** - Consolidated and optimized project documentation
-  + Integrated multiple README files into single comprehensive guide
-  + Dedicated BUILD_GUIDE.md for Windows installer creation
-  + Clear user paths for Windows installer vs. command-line usage
-  + Reduced documentation size by ~75% while preserving essential information
-
-### improve
-
-+ Complete transformation from command-line only to dual-interface application
-+ Professional user experience with modern GUI design patterns
-+ Simplified deployment through automated installer creation
-+ Enhanced accessibility for non-technical users
-+ Better error handling and user feedback in GUI environment
-
-### technical
-
-+ Added `ui.py` - Main GUI application with tkinter interface
-+ Added `run_gui.py` - GUI launcher script
-+ Added `src/auth_helper.py` - GUI/console authentication helper
-+ Added Windows packaging scripts (`package_windows.bat`, `build_windows.bat`, etc.)
-+ Added PyInstaller configuration (`telegram_bot.spec`)
-+ Added Inno Setup installer configuration (`installer.iss`)
+## 1.0.0.0813
 
-## 0.5.1.0811-0155 Refactor bot.py
-
-## 0.5.0.0811-1135 Interactive Folder Navigation
+- **GUI Application Release**:
+  - Full-featured desktop GUI with tabs (Config, Logs, Control).
+  - System tray support, real-time logs, session authentication.
+  - Config auto-save with validation.
+- **Windows Installer**:
+  - One-click installer with auto-update, no Python required.
+- **Documentation Consolidation**:
+  - Combined and streamlined all setup and usage guides.
 
-### feature
-
-+ **Interactive Folder Navigation System** - Complete user-controlled download organization
-  + Real-time folder selection with interactive commands (`/cr`, `/cd`, `/cd..`, `/ok`)
-  + Dynamic folder creation and navigation during download process
-  + Live media statistics display for each folder (videos, photos, documents)
-  + Seamless integration with existing download workflow
-  + Multi-language command support (English and Chinese aliases)
-
-+ **Enhanced User Experience** - Intuitive folder management interface
-  + Visual folder tree display with current location indicator
-  + Real-time feedback for folder operations (create, navigate, confirm)
-  + Smart path validation and error handling
-  + User state management for concurrent sessions
-  + Clear command instructions and help text
-
-+ **Flexible Download Organization** - User-controlled file placement
-  + Choose destination folder before download starts
-  + Create nested folder structures on-the-fly
-  + Browse existing folders with media count previews
-  + Organize downloads by topic, date, or any custom structure
-  + Maintain clean separation between different download sessions
-
-### improve
-
-+ Enhanced bot architecture with dedicated folder navigation component
-+ Improved user workflow with clear separation of folder selection and download phases
-+ Better error handling and user feedback for folder operations
-+ More intuitive download organization compared to automatic timestamped directories
-+ Cleaner code organization with `FolderNavigator` class handling all path logic
-
-## 0.4.0.0806-2329 Database Integration and Enhanced Management
-
-### feature
-
-+ **SQLite Database Integration** - Persistent storage for download history and metadata
-  + Track all downloads with detailed metadata (message ID, file names, sizes, dates)
-  + Duplicate detection to prevent re-downloading existing files
-  + Download history queries and statistics
-  + Automated database initialization and schema management
-
-+ **Enhanced Download Management** - Improved file organization and tracking
-  + Smart duplicate prevention using database lookups
-  + Comprehensive download statistics and reporting
-  + Better error tracking and recovery mechanisms
-  + Enhanced logging with database integration
-
-### improve
-
-+ Database-driven architecture provides better scalability and data persistence
-+ Improved performance through intelligent duplicate detection
-+ Enhanced reliability with persistent download history
-+ Better user experience with detailed download statistics
-
-## 0.3.1.0806-1730 Media Group Support
-
-### feature
-
-+ **Media Group Detection and Processing** - Intelligent handling of grouped media (albums)
-  + Automatically detects messages with `media_group_id` from Bot API
-  + Implements 2-second collection delay to ensure all grouped messages are captured
-  + Smart collection mechanism with timer-based processing
-  + Enhanced logging for media group collection progress
-
-+ **Advanced Media Group Retrieval** - Multi-method approach for robust media group handling
-  + Method 1: Direct `grouped_id` matching using Telethon API
-  + Method 2: Range-based search around original message ID (±20 messages)
-  + Method 3: Graceful fallback to original message processing
-  + Handles Bot API and Telethon ID differences intelligently
-
-+ **Enhanced Architecture** - Extended modular design for media group support
-  + `_handle_media_group()` - Collects and manages grouped messages
-  + `_process_media_group_delayed()` - Timer-based processing with async delay
-  + `_process_grouped_messages()` - Dedicated media group download workflow
-  + `_process_single_message()` - Refactored single message processing
-  + `_download_and_monitor()` - Shared download and monitoring logic
-
-+ **Smart Storage Organization** - Media group aware directory structure
-  + Media groups stored in `mediagroup_{id}_{timestamp}` directories
-  + Single messages continue using `message_{id}_{timestamp}` format
-  + Preserves existing file naming conventions and organization
-
-### improve
+## 0.5.1.0811-0155
 
-+ Enhanced bot architecture with clear separation of group vs single message processing
-+ Improved error handling and logging for media group operations
-+ Better resource management with shared download monitoring logic
-+ More robust message collection with multiple detection methods
-
-## 0.3.0.0806-1430 Major Architecture Refactoring
+- **Refactor**: Improved code structure in `bot.py`.
 
-### refactor
+## 0.5.0.0811-1135
 
-+ **Complete codebase restructure** - Split monolithic telegram_bot.py (596 lines) into modular architecture
-  + Create `src/bot.py` (247 lines) - Main bot logic and message handling
-  + Create `src/downloader.py` (234 lines) - Download operations with concurrent processing
-  + Create `src/monitor.py` (134 lines) - Real-time monitoring and progress tracking
-  + Create `src/__init__.py` - Package initialization and clean exports
-
-+ **Separation of Concerns** - Each module has single responsibility
-  + `TelegramMediaBot` class focuses on bot orchestration and user interaction
-  + `MediaDownloader` class handles all download operations and file management
-  + `DownloadMonitor` class manages real-time progress tracking and system monitoring
-
-+ **Improved maintainability and testability**
-  + Individual components can be tested independently
-  + Clear interfaces between modules
-  + Easier debugging and troubleshooting
-  + Better code organization for future development
-
-### feature
-
-+ Add total file size display throughout download process
-  + Pre-download analysis shows total expected download size
-  + Real-time progress shows downloaded/total MB with percentage
-  + Enhanced completion summary with size comparison and completion rate
-  + `get_media_size()` method for accurate file size calculation before download
-
-+ Enhanced progress monitoring with comprehensive metrics
-  + Show progress as "45.2MB / 125.3MB (36.1%)" format
-  + Calculate and display completion percentage in real-time
-  + Improved ETA calculations based on current download speed
-  + Better disk space monitoring and warnings
-
-### misc
-
-+ Backup original telegram_bot.py as telegram_bot.py.bak
-+ Update main.py imports to use new modular structure
-+ Update CLAUDE.md documentation to reflect new architecture
-+ All modules pass syntax validation and import structure tests
-
-## 0.2.1.0806-1155 Enhanced Download Reliability
-
-### feature
-
-+ Add retry mechanism for media downloads
-  + Implement `download_media_with_retry()` with exponential backoff
-  + Support up to 3 retry attempts for failed downloads
-  + Handle network errors, timeouts, and Telegram API errors gracefully
-  + Add FloodWaitError handling to respect rate limits
-
-+ Add progress tracking and persistence
-  + Implement `save_progress()` and `load_progress()` for download state management
-  + Save progress every 10 processed messages to prevent data loss
-  + Track completed and failed files separately
-  + Resume functionality for interrupted downloads
-
-+ Enhanced error handling and logging
-  + Improved error messages for better user feedback
-  + Detailed logging for debugging download issues
-  + Separate handling for different types of Telegram API errors
-  + More informative error messages when message retrieval fails
-
-+ Improved download reporting
-  + Show count of both successful and failed downloads
-  + Display detailed completion status in final message
-  + Better progress updates during bulk downloads
-
-### misc
-
-+ Add required imports: time, json modules
-+ Add error classes: FloodWaitError, RPCError from telethon.errors
-
-## 0.2.0.0805-1015 Backup Mode Implementation
-
-### feature
-
-+ Convert bot to backup-only mode
-  + Remove ZIP file creation functionality
-  + Remove file upload/sending to users
-  + Files now permanently stored on server in organized directories
-  + Added backup completion summary with file count, total size, and storage location
-  + Updated progress messages to reflect backup operations instead of download/upload
-
-### docs
-
-+ Update README.md to reflect backup-only functionality
-+ Update CLAUDE.md documentation for new backup workflow
-
-## 0.1.1.0805-1632 Documentation Fix
-
-### fix
-
-+ Fix README.md incorrect parts
-  + Update entry point from `python src/telegram_bot.py` to `python main.py`
-  + Update project structure to reflect actual files (config.py, main.py, ChangeLog.md)
-  + Remove reference to non-existent .env.example file in setup instructions
-
-## 0.1.0.0805-1200 Initial Release
-
-### feature
-
-+ Add src/telegram_bot.py - TelegramBot class
-  + Core bot functionality for handling Telegram messages
-  + Media download support for photos, videos, GIFs, audio, and documents
-  + Smart file naming with timestamps and message IDs
-  + Automatic ZIP packaging of downloaded files
-  + Progress updates during download process
-  + File size validation (50MB Telegram limit)
-  + Comprehensive error handling and logging
-+ Add config/config.py - environment variable management
-  + BOT_TOKEN configuration
-  + API_ID and API_HASH configuration
-  + SESSION_NAME configuration
-  + Input validation and error handling
-+ Add main.py - application entry point
-  + Configuration validation
-  + Bot initialization and startup
-  + Graceful error handling for missing environment variables
-+ Add requirements.txt - Python dependencies
-  + telethon for Telegram client functionality
-  + python-telegram-bot for bot framework
-  + python-dotenv for environment variable management
-+ Add .env.example - environment variables template
-  + Template for required Telegram API credentials
-  + Clear documentation for each required variable
-+ Add .gitignore - Git ignore rules
-  + Exclude .env files and API keys
-  + Exclude Telegram session files
-  + Exclude downloads and logs directories
-  + Standard Python ignore patterns
-
-### docs
-
-+ Add README.md - comprehensive project documentation
-  + Setup and installation instructions
-  + Environment configuration guide
-  + Usage examples and bot commands
-  + Feature descriptions and limitations
-  + Troubleshooting section
-
-### misc
-
-+ Add downloads/ directory - media storage location
-+ Add logs/ directory - application logging storage
-+ Initialize project structure with proper directory organization
+- **Interactive Folder Navigation**:
+  - Real-time folder selection with commands.
+  - Multi-language support and visual feedback.
+- **Improved UX**: Cleaner workflow and user state handling.
+
+## 0.4.0.0806-2329
+
+- **SQLite Integration**:
+  - Persistent download history and duplicate prevention.
+- **Download Management Enhancements**:
+  - Smarter logging, error tracking, and statistics.
+
+## 0.3.1.0806-1730
+
+- **Media Group Support**:
+  - Detect and download grouped media (albums).
+  - Intelligent fallback strategies and improved organization.
+
+## 0.3.0.0806-1430
+
+- **Major Code Refactor**:
+  - Split monolithic bot into modular components.
+  - Improved maintainability and testing.
+- **Download Metrics**:
+  - Show file sizes, percentages, and ETA.
+
+## 0.2.1.0806-1155
+
+- **Improved Reliability**:
+  - Retry logic, progress persistence, and better error handling.
+
+## 0.2.0.0805-1015
+
+- **Backup Mode**:
+  - Removed upload/ZIP features, now stores files locally only.
+
+## 0.1.1.0805-1632
+
+- **Docs Fix**: Corrected README structure and setup instructions.
+
+## 0.1.0.0805-1200
+
+- **Initial Release**:
+  - Basic Telegram bot for media downloads.
+  - ZIP packaging, config management, error handling, and documentation.
