@@ -3,8 +3,8 @@
 ; Do not use the same AppId value in installers for other applications.
 AppId={{A5B3C2D1-E4F6-4A7B-8C9D-1E2F3A4B5C6D}}
 AppName=Telegram Auto Download Bot
-AppVersion=1.3.0
-AppVerName=Telegram Auto Download Bot v1.3.0
+AppVersion=2.0.0
+AppVerName=Telegram Auto Download Bot v2.0.0
 AppPublisher=Telegram Auto Download Bot
 AppPublisherURL=https://github.com/your-repo/telegram_auto_download
 AppSupportURL=https://github.com/your-repo/telegram_auto_download/issues
@@ -14,7 +14,7 @@ DisableProgramGroupPage=yes
 ; Remove the following line to run in administrative install mode (install for all users)
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=TelegramAutoDownload-Setup-v1.3.0
+OutputBaseFilename=TelegramAutoDownload-Setup-v2.0.0
 SetupIconFile=assets\icon.ico
 Compression=lzma
 SolidCompression=yes
@@ -27,13 +27,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
+Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
 Name: "startmenu"; Description: "Create Start Menu entry"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [Files]
 Source: "dist\TelegramAutoDownload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "fix_windows_security.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "assets\*"; DestDir: "{app}\assets\"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]
@@ -47,8 +48,6 @@ Filename: "{app}\fix_windows_security.bat"; Description: "Fix Windows Security f
 
 [UninstallDelete]
 Type: files; Name: "{app}\*.log"
-Type: files; Name: "{app}\*.session"
-Type: files; Name: "{app}\*.db"
 Type: dirifempty; Name: "{app}\logs"
 Type: dirifempty; Name: "{app}"
 

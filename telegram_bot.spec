@@ -18,6 +18,7 @@ hiddenimports = [
     'src.monitor',
     'src.folder_navigator',
     'src.database',
+    'src.ui',
     'config',
     'config.config',
     
@@ -137,7 +138,7 @@ except Exception:
 
 # Analysis configuration
 a = Analysis(
-    ['run_gui.py'],
+    ['main.py'],
     pathex=[project_root],
     binaries=[],
     datas=datas,

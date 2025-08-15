@@ -4,18 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v1.3.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, interactive folder navigation, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.0.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, interactive folder navigation, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
 ### Running the Application
 
 ```bash
-# Command Line Interface
+# GUI Mode (default on Windows)
 python main.py
 
-# GUI Application (Windows)
-python run_gui.py
+# CLI Mode (explicit)
+python main.py --cli
+
+# GUI Mode (explicit)
+python main.py --gui
 ```
 
 ### Building Windows Installer
@@ -55,12 +58,11 @@ setup_build_env.bat
 ### Core Components
 
 ### GUI Application Components
-- **ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0)
-- **run_gui.py**: GUI launcher script for Windows application (v1.0.0)
+- **src/ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0, migrated to src/ in v1.3.0)
 - **src/auth_helper.py**: GUI and console authentication helper for Telethon client (v1.0.0)
 
 ### Core Bot Components
-- **main.py**: Entry point that validates configuration and starts the command-line bot
+- **main.py**: Unified entry point supporting both CLI and GUI modes with command-line arguments
 - **src/bot.py**: Main bot logic and message handling (`TelegramMediaBot` class)
 - **src/downloader.py**: Media download operations with concurrent processing (`MediaDownloader` class)
 - **src/monitor.py**: Real-time monitoring and progress tracking (`DownloadMonitor` class)
@@ -179,12 +181,11 @@ telegram_auto_download/
 │   ├── database.py             # SQLite database management and operations
 │   ├── folder_navigator.py     # Interactive folder navigation system (260 lines)
 │   ├── auth_helper.py          # GUI/console authentication helper (197 lines, v1.0.0)
+│   ├── ui.py                   # Main GUI application (tkinter interface, v1.3.0)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)
 ├── config/
 │   └── config.py               # Configuration management
-├── ui.py                       # Main GUI application (tkinter interface, v1.0.0)
-├── run_gui.py                  # GUI launcher script (v1.0.0)
-├── main.py                     # Command-line application entry point
+├── main.py                     # Unified application entry point (CLI/GUI)
 ├── package_windows.bat         # Windows installer build script (v1.0.0)
 ├── setup_build_env.bat         # Build environment setup script
 ├── bump_version.bat            # Version bumping script

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class MediaDownloader:
     """處理媒體文件下載的類"""
     
-    def __init__(self, client: TelegramClient, max_concurrent_downloads=5, db_path="downloads.db"):
+    def __init__(self, client: TelegramClient, max_concurrent_downloads=5, db_path=None):
         self.client = client
         self.max_concurrent_downloads = max_concurrent_downloads
         self.download_semaphore = asyncio.Semaphore(max_concurrent_downloads)

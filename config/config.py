@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -35,8 +36,22 @@ def validate_config():
     return True
 
 # File and Directory Configuration
-DOWNLOADS_DIR = DOWNLOADS_PATH or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'downloads')
-LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+def get_app_dir():
+    """Get the application directory that works for both development and packaged app"""
+    if hasattr(sys, '_MEIPASS'):
+        # Running as packaged executable
+        return os.path.dirname(sys.executable)
+    else:
+        # Running in development
+        return os.path.dirname(os.path.dirname(__file__))
+
+def get_database_path():
+    """Get the database path that works for both development and packaged app"""
+    return os.path.join(get_app_dir(), 'downloads.db')
+
+DOWNLOADS_DIR = DOWNLOADS_PATH or os.path.join(get_app_dir(), 'downloads')
+LOGS_DIR = os.path.join(get_app_dir(), 'logs')
+DATABASE_PATH = get_database_path()
 
 # Bot Configuration
 MAX_FILE_SIZE_MB = 50  # Telegram bot file upload limit

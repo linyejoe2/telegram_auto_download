@@ -12,7 +12,7 @@ set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
 REM ===== Version constant =====
-set "APP_VERSION=1.3.0"
+set "APP_VERSION=2.0.0"
 REM ============================
 
 REM Check Python installation
@@ -89,13 +89,8 @@ if errorlevel 1 (
 
 REM Test the application before building
 echo [7/10] Testing application syntax...
-python -m py_compile ui.py
-if errorlevel 1 (
-    call :display_error "Application syntax errors detected."
-    goto :end
-)
 
-python -m py_compile run_gui.py
+python -m py_compile main.py
 if errorlevel 1 (
     call :display_error "GUI launcher syntax errors detected."
     goto :end

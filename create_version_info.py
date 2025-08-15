@@ -6,7 +6,7 @@ Create version information file for Windows executable
 import os
 
 # ===== Version constant =====
-APP_VERSION = "1.3.0"
+APP_VERSION = "2.0.0"
 APP_VERSION_TUPLE = tuple(map(int, APP_VERSION.split("."))) + (0,)
 # ============================
 

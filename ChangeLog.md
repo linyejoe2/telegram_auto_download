@@ -1,5 +1,23 @@
 # ChangeLog
 
+## 2.0.0.0815-1127
+
+- **Architecture Refactoring**:
+  - Moved UI module from root to `src/ui.py` for better organization
+  - Enhanced `main.py` with unified CLI/GUI entry point and argument parsing
+  - Added PyInstaller stdin/stdout fixes for GUI applications
+  - Removed deprecated `run_gui.py` file
+- **Database Improvements**:
+  - Major refactoring of `src/database.py` (224 line changes)
+  - Enhanced database operations and schema management
+- **Configuration Updates**:
+  - Enhanced build configuration and installer settings
+  - Improved config validation and error handling
+- **Project Structure**:
+  - Consolidated GUI components under `src/` directory
+  - Updated build scripts and version management
+  - Enhanced Windows installer configuration
+
 ## 1.2.0.0814-1118
 
 - **Download Optimization**: Start download from the smallest file.

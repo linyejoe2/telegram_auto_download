@@ -7,18 +7,29 @@ import sys
 import logging
 from dotenv import load_dotenv, set_key
 import pystray
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 import asyncio
 import subprocess
 import platform
-from main import main as bot_main
-from src.bot import log_queue
-from src.database import DatabaseManager
+import sys
+import os
+import time
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import the main CLI function
+try:
+    from main import main as bot_main
+except ImportError:
+    # Handle circular import by importing at runtime
+    bot_main = None
+from .bot import log_queue
+from .database import DatabaseManager
 from config.config import validate_config
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v1.3.0"
+        self.version = "v2.0.0"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x600")
@@ -26,9 +37,8 @@ class TelegramBotGUI:
         
         # Set window icon using the same tray image
         try:
-            icon_image = self.create_tray_image()
+            icon_image = Image.open("assets/icon.ico")
             # Convert PIL image to PhotoImage for tkinter
-            from PIL import ImageTk
             photo = ImageTk.PhotoImage(icon_image)
             self.root.iconphoto(True, photo)
         except Exception as e:
@@ -61,22 +71,10 @@ class TelegramBotGUI:
         # Initialize database displays
         self.root.after(500, self.init_database_displays)
         
+        self.database_update_thread = threading.Thread(target=self.refresh_database, daemon=True)
+        
         # Auto-start bot if configuration is valid
-        # self.auto_start_bot()
-
-    def create_tray_image(self):
-        """Create a simple icon for system tray"""
-        # Create a simple icon image
-        width = 64
-        height = 64
-        image = Image.new('RGB', (width, height), color='blue')
-        draw = ImageDraw.Draw(image)
-        
-        # Draw a simple "T" for Telegram
-        draw.rectangle([20, 10, 30, 50], fill='white')
-        draw.rectangle([10, 10, 50, 20], fill='white')
-        
-        return image
+        self.auto_start_bot()
 
     def setup_gui(self):
         """Setup the main GUI interface"""
@@ -219,7 +217,7 @@ class TelegramBotGUI:
         self.file_types_frame.pack(fill=tk.X, pady=5)
         
         # Refresh stats button
-        ttk.Button(stats_frame, text="Refresh Statistics", command=self.refresh_statistics).pack(side=tk.LEFT, pady=5)
+        # ttk.Button(stats_frame, text="Refresh Statistics", command=self.refresh_statistics).pack(side=tk.LEFT, pady=5)
         
         # Recent downloads section
         downloads_frame = ttk.LabelFrame(parent, text="Recent Downloads", padding="10")
@@ -457,7 +455,12 @@ class TelegramBotGUI:
     def run_bot(self):
         """Run the bot in a separate thread"""
         try:
-            asyncio.run(bot_main())
+            if bot_main is None:
+                # Import at runtime to avoid circular import
+                from main import main as cli_main
+                asyncio.run(cli_main())
+            else:
+                asyncio.run(bot_main())
             # Import bot directly and run with GUI root
             # from config.config import validate_config, API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN
             # from src.bot import TelegramMediaBot
@@ -497,6 +500,12 @@ class TelegramBotGUI:
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save logs: {str(e)}")
+            
+    def refresh_database(self):
+        self.refresh_statistics()
+        self.refresh_downloads()
+        time.sleep(1)
+        self.refresh_database()
 
     def refresh_statistics(self):
         """Refresh download statistics"""
@@ -619,7 +628,7 @@ class TelegramBotGUI:
         """Setup system tray functionality"""
         try:
             # Create tray icon
-            icon_image = self.create_tray_image()
+            icon_image = Image.open("assets/icon.ico")
             
             # Create menu
             menu = pystray.Menu(
