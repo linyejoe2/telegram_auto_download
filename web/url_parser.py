@@ -17,6 +17,12 @@ _YOUTUBE_RE = re.compile(
     re.IGNORECASE
 )
 
+# X / Twitter patterns (x.com or twitter.com .../status/...)
+_X_RE = re.compile(
+    r'https?://(www\.)?(x\.com|twitter\.com)/[^/\s]+/status/\d+',
+    re.IGNORECASE
+)
+
 
 def extract_url(text: str) -> Optional[str]:
     """Return the first HTTP(S) URL found in text, or None."""
@@ -30,6 +36,8 @@ def detect_type(url: str) -> Optional[str]:
     """Return a downloader type string, or None if unsupported."""
     if _YOUTUBE_RE.match(url):
         return 'youtube'
+    if _X_RE.match(url):
+        return 'x'
     return None
 
 
@@ -47,7 +55,12 @@ async def handle_url(url: str, url_type: str, user_id: int, processing_msg, fold
         await YouTubeDownloader().start_flow(url, user_id, processing_msg, folder_navigator)
         return True
 
-    await processing_msg.edit_text("❌ 不支援的連結類型，目前僅支援 YouTube")
+    if url_type == 'x':
+        from .x_downloader import XDownloader
+        await XDownloader().start_flow(url, user_id, processing_msg, folder_navigator)
+        return True
+
+    await processing_msg.edit_text("❌ 不支援的連結類型，目前支援 YouTube 及 X (Twitter)")
     return False
 
 
@@ -67,5 +80,8 @@ async def download_confirmed(
     if url_type == 'youtube':
         from .youtube_downloader import YouTubeDownloader
         await YouTubeDownloader().download(url, selected_path, processing_msg)
+    elif url_type == 'x':
+        from .x_downloader import XDownloader
+        await XDownloader().download(url, selected_path, processing_msg)
     else:
         await processing_msg.edit_text(f"❌ 不支援的下載類型: {url_type}")

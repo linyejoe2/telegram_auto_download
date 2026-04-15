@@ -427,7 +427,7 @@ class TelegramMediaBot:
                         detected_url, url_type, user_id, processing_msg, self.folder_navigator
                     )
                 else:
-                    await msg.reply_text("❌ 不支援的連結類型，目前支援 YouTube 網址")
+                    await msg.reply_text("❌ 不支援的連結類型，目前支援 YouTube 及 X (Twitter) 網址")
                 return
 
         # require forwarded message

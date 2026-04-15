@@ -162,7 +162,7 @@ set "END_TIME=%TIME%"
 echo Build started at: %START_TIME%
 echo Build ended at: %END_TIME%
 echo.
-pause
+@REM pause
 
 :end
 echo.

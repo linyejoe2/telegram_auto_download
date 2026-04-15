@@ -156,7 +156,6 @@ a = Analysis(
     excludes=[
         # Exclude large packages we don't need
         'matplotlib',
-        'scipy',
         'pandas',
         'jupyter',
         'IPython',
@@ -174,12 +173,11 @@ a = Analysis(
         'test',
         'tests',
         'testing',
-        'unittest',
         'doctest',
         
         # Development tools
         'pdb',
-        'pydoc',
+        #'pydoc',
         'debugpy',
         'pydevd',
         
