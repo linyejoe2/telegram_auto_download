@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.0.0
+# Telegram Auto Download Bot v2.1.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -13,7 +13,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
   One-click setup — no Python required. Professional packaging with auto-updates.
 
 - **📁 Folder Navigation**  
-  Interactive commands (`/cr`, `/cd`, `/ok`) to choose download location.
+  Interactive inline keyboard buttons to browse and choose download location, with previous-path quick-select.
 
 - **🗃️ SQLite Database**  
   Tracks download history and prevents duplicates.
@@ -27,7 +27,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.0.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.1.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -88,16 +88,19 @@ Run: `package_windows.bat`
 - Bot Token: Message @BotFather → /newbot
 - Phone Number: Your full number with country code (e.g., +1234567890)
 
-## 📦 Folder Commands
+## 📁 Folder Navigation
 
-Forward any media to the bot, then use:
+Forward any media to the bot. An inline keyboard appears automatically:
 
-```
-/cr <name>    # Create folder
-/cd <name>    # Enter folder
-/cd..         # Go up
-/ok           # Start download
-```
+| Button | Action |
+|---|---|
+| `📁 FolderName` | Enter that subfolder |
+| `⬆️ 返回上級` | Go up one level (hidden at root) |
+| `✅ 確認這裡` | Confirm current location and start download |
+| `📝 新建資料夾` | Prompt to type a new folder name |
+| `🕐 /prev/path` | Jump to a previously used path |
+
+Up to 5 previously confirmed paths are remembered and shown as quick-select buttons.
 
 ## 📄 License & Disclaimer
 

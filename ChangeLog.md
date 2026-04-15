@@ -1,5 +1,24 @@
 # ChangeLog
 
+## 2.1.0
+
+- **Inline Keyboard Folder Navigation** (v2.1.0):
+  - Replaced text commands (`/cr`, `/cd`, `/cd..`, `/ok`) with Telegram inline keyboard buttons
+  - Subfolder buttons displayed in a grid (2 per row, truncated to 18 chars)
+  - `⬆️ 返回上級` button appears only when not at root; `✅ 確認這裡` always visible
+  - `📝 新建資料夾` button prompts user to type a folder name as a plain text message
+  - Bot deletes the user's typed name and updates the navigation message seamlessly
+- **Previous Path History** (v2.1.0):
+  - Up to 5 previously confirmed paths stored per user session
+  - Up to 3 `🕐 /path` quick-select buttons shown at the bottom of the keyboard
+  - Only paths that still exist on disk are shown
+  - History is preserved across downloads (survives `clear_user_state`)
+  - Most recently confirmed path always appears first; duplicates are deduplicated
+- **Bot Internals**:
+  - Added `CallbackQueryHandler` in `bot.py` routing all `fn_*` callback data
+  - `_start_download_with_selected_folder` now takes `user_id` + `processing_msg` directly (no `Update` dependency)
+  - `FolderNavigator._generate_folder_ui` returns `(text, InlineKeyboardMarkup)` tuple throughout
+
 ## 2.0.0.0815-1127
 
 - **Architecture Refactoring**:

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.0.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, interactive folder navigation, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.1.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -109,8 +109,8 @@ setup_build_env.bat
 3. Bot extracts original chat and message information from forward metadata
 4. Database checks for existing downloads to prevent duplicates (v0.4.0)
 5. Uses Telethon client to access the original message, media groups, and all replies
-6. `FolderNavigator` presents interactive folder selection UI with existing folder statistics (v0.5.0)
-7. User navigates folders using commands (`/cr`, `/cd`, `/cd..`, `/ok`) to select download location (v0.5.0)
+6. `FolderNavigator` presents inline keyboard UI with subfolder buttons, up/confirm/create actions, and previous-path history (v2.1.0)
+7. User navigates folders by tapping inline buttons; types a name only when creating a new folder (v2.1.0)
 8. Downloads all media files concurrently using `MediaDownloader` to user-selected folder (v0.5.0)
 9. Database records download metadata and file information (v0.4.0)
 10. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
@@ -121,10 +121,9 @@ setup_build_env.bat
 #### `TelegramMediaBot` (src/bot.py)
 Main orchestration class that coordinates all bot operations:
 - `start_client()`: Enhanced authentication with session validation and GUI support (v1.0.0)
-- `handle_message()`: Processes forwarded messages and routes to group/single processing
+- `handle_message()`: Processes forwarded messages, folder name input, and routes to group/single processing
+- `handle_callback_query()`: Routes inline keyboard button presses (`fn_cd`, `fn_up`, `fn_ok`, `fn_cr`, `fn_prev`) (v2.1.0)
 - `_handle_media_group()`: Collects and processes media group messages
-- `_process_grouped_messages()`: Handles media group download workflow
-- `_process_single_message()`: Handles individual message workflow
 - `_download_and_monitor()`: Shared download and monitoring logic
 - `get_message_and_replies()`: Retrieves original message and replies using Telethon with enhanced error handling
 - `run()`: Main bot startup and event loop management
@@ -144,13 +143,17 @@ Real-time monitoring and progress tracking:
 - `calculate_speed()` / `calculate_eta()`: Performance metrics calculations
 - `get_disk_usage()`: System resource monitoring
 
-#### `FolderNavigator` (src/folder_navigator.py) 
-Interactive folder navigation and path management:
-- `start_folder_selection()`: Initiates folder selection workflow with media statistics
-- `process_folder_command()`: Handles folder navigation commands (`/cr`, `/cd`, `/cd..`, `/ok`)
-- `get_selected_path()`: Returns user-selected download destination path
-- `_generate_folder_ui()`: Creates interactive folder browsing interface
-- `is_awaiting_folder_selection()`: Manages user state during folder selection
+#### `FolderNavigator` (src/folder_navigator.py)
+Inline keyboard folder navigation and path management (v2.1.0):
+- `start_folder_selection()`: Initiates folder selection, returns `(text, InlineKeyboardMarkup)`
+- `navigate_into(user_id, folder_index)`: Enters subfolder by button index
+- `navigate_up(user_id)`: Goes up one directory level
+- `navigate_to_history(user_id, history_index)`: Jumps to a previously confirmed path
+- `create_folder_and_navigate(user_id, folder_name)`: Creates folder from user text input and navigates into it
+- `confirm_selection(user_id)`: Confirms path, updates history (max 5 entries, most recent first)
+- `get_selected_path()`: Returns absolute path of current selection
+- `is_awaiting_folder_selection()` / `is_awaiting_folder_name()`: State guards for message routing
+- `clear_user_state()`: Resets navigation state while preserving path history
 
 #### `AuthHelper` (src/auth_helper.py)
 GUI and console authentication management (v1.0.0):
@@ -247,11 +250,11 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - Smart file naming includes message ID and timestamp
 
 ### User Experience Features
-- **Interactive Folder Selection**: Choose download location with intuitive commands (v0.5.0)
-  - Browse existing folders with live media statistics
-  - Create new folders on-the-fly during selection process
-  - Navigate folder hierarchy with simple commands (`/cd`, `/cd..`, `/cr`, `/ok`)
-  - Visual feedback showing current location and available folders
+- **Inline Keyboard Folder Selection**: Choose download location via tap-able buttons (v2.1.0)
+  - Subfolder buttons displayed in a 2-per-row grid with live media statistics
+  - `⬆️ 返回上級`, `✅ 確認這裡`, `📝 新建資料夾` action buttons
+  - Up to 3 `🕐 /prev/path` quick-select buttons for previously used locations
+  - New folder creation via a single text message — bot deletes input and updates keyboard seamlessly
 - Real-time progress updates every 5 seconds with:
   - Completed/failed file counts
   - Download speed (MB/s)
@@ -266,7 +269,7 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - **Dual Interface Design**: Seamless switching between GUI and command-line modes (v1.0.0)
 - **Enhanced Authentication Architecture**: Robust session management with GUI/console fallback
 - **Modular Design**: Refactored from monolithic 596-line file into 6 specialized modules
-- **Interactive Navigation Architecture**: Dedicated folder navigation system with state management
+- **Inline Keyboard Navigation Architecture**: Button-driven folder navigation with index-based callback routing and persistent path history (v2.1.0)
 - **Media Group Architecture**: Intelligent collection and processing of grouped media
 - **Database Architecture**: SQLite integration for persistent download tracking and metadata
 - **Asyncio-based Architecture**: Concurrent processing for maximum performance
