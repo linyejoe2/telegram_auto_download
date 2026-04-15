@@ -12,6 +12,7 @@ from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filt
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
+from web import url_parser
 
 # 設定日誌
 log_queue = queue.Queue()
@@ -350,11 +351,22 @@ class TelegramMediaBot:
                 await query.message.edit_text(text, reply_markup=markup)
 
             elif data == "fn_ok":
+                state = self.folder_navigator.get_user_state(user_id)
+                pending_url = state.pending_url
+                url_type = state.url_type
+
                 display_path, _ = self.folder_navigator.confirm_selection(user_id)
                 pending = self.folder_navigator.get_pending_messages(user_id)
+
                 await query.message.edit_text(f"📁 已確認存放位置: {display_path}\n🚀 開始下載...")
+
                 if pending:
                     await self._start_download_with_selected_folder(user_id, query.message, pending)
+                elif pending_url and url_type:
+                    await url_parser.download_confirmed(
+                        user_id, pending_url, url_type, query.message, self.folder_navigator
+                    )
+
                 self.folder_navigator.clear_user_state(user_id)
 
             elif data.startswith("fn_cd:"):
@@ -404,11 +416,26 @@ class TelegramMediaBot:
             await msg.reply_text('請使用上方的按鈕選擇資料夾位置')
             return
 
+        # Detect URL (e.g. YouTube link)
+        if msg.text:
+            detected_url = url_parser.extract_url(msg.text)
+            if detected_url:
+                url_type = url_parser.detect_type(detected_url)
+                if url_type:
+                    processing_msg = await msg.reply_text("🔍 正在解析連結...")
+                    await url_parser.handle_url(
+                        detected_url, url_type, user_id, processing_msg, self.folder_navigator
+                    )
+                else:
+                    await msg.reply_text("❌ 不支援的連結類型，目前支援 YouTube 網址")
+                return
+
         # require forwarded message
         if not msg.forward_origin:
             await msg.reply_text(
                 '請轉發一則訊息給我，我會備份該訊息及其所有回覆中的媒體文件到伺服器！\n\n'
-                '支援的媒體類型：照片、影片、GIF、音訊等'
+                '支援的媒體類型：照片、影片、GIF、音訊等\n\n'
+                '也可以直接發送 YouTube 網址進行下載'
             )
             return
         

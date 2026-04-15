@@ -11,6 +11,8 @@ project_root = os.path.dirname(os.path.abspath(SPEC))
 
 # Collect hidden imports - all modules that might not be detected automatically
 hiddenimports = [
+    'cv2',
+
     # Core application modules
     'src',
     'src.bot',
@@ -109,6 +111,11 @@ hiddenimports = [
     'cryptography.hazmat.backends',
     'rsa',
     'pyaes',
+
+    # custom
+    'imagehash',
+    'PIL',
+    'numpy',
 ]
 
 # Collect data files
@@ -149,7 +156,6 @@ a = Analysis(
     excludes=[
         # Exclude large packages we don't need
         'matplotlib',
-        'numpy',
         'scipy',
         'pandas',
         'jupyter',
@@ -178,8 +184,6 @@ a = Analysis(
         'pydevd',
         
         # Large optional libraries
-        'opencv',
-        'cv2',
         'tensorflow',
         'torch',
         'sklearn',

@@ -10,6 +10,7 @@ import sys
 import os
 import argparse
 import io
+import cv2
 
 def fix_stdin_stdout():
     """Fix stdin/stdout for PyInstaller GUI applications"""
@@ -78,6 +79,8 @@ if __name__ == "__main__":
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode (default)")
     
     args = parser.parse_args()
+    
+    print(f"OpenCV version: {cv2.__version__}")
     
     # Default to GUI if no arguments provided and we're in a Windows environment
     # or if explicitly requested

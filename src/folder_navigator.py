@@ -22,6 +22,8 @@ class NavigationState:
     current_folders: List = None    # 目前目錄的資料夾列表（供索引回調使用）
     path_history: List = None       # 已確認過的路徑歷史（最近在前）
     nav_message: object = None      # 導航訊息對象（用於編輯）
+    pending_url: str = None         # 待下載的 URL（非 Telegram 媒體）
+    url_type: str = None            # URL 類型，例如 'youtube'
 
     def __post_init__(self):
         if self.pending_messages is None:

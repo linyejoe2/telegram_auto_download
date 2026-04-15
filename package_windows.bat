@@ -12,7 +12,7 @@ set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
 REM ===== Version constant =====
-set "APP_VERSION=2.1.0"
+set "APP_VERSION=2.3.0"
 REM ============================
 
 REM Check Python installation
@@ -44,7 +44,7 @@ echo [3/10] Cleaning previous builds...
 if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 if exist "installer_output" rmdir /s /q "installer_output"
-if exist "build_env" rmdir /s /q "build_env"
+@REM if exist "build_env" rmdir /s /q "build_env"
 REM Keep our custom telegram_bot.spec file - only delete auto-generated ones
 for %%f in (*.spec) do (
     if not "%%f"=="telegram_bot.spec" del "%%f"
