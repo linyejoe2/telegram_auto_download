@@ -7,7 +7,7 @@ import queue
 from telethon import TelegramClient
 from telethon.errors import RPCError
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
@@ -104,6 +104,7 @@ class TelegramMediaBot:
 
         # Bot Application (python-telegram-bot)
         self.app = Application.builder().token(bot_token).build()
+        self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
 
     # ---------------------- startup ----------------------
@@ -314,53 +315,100 @@ class TelegramMediaBot:
         return counts
 
     async def _prepare_folder_selection(self, user_id, messages_to_download, processing_msg):
-        """共用的：觸發 FolderNavigator 並編輯 processing_msg 顯示資訊"""
+        """觸發 FolderNavigator 並編輯 processing_msg 顯示 Inline Keyboard"""
         counts = self._count_media_types(messages_to_download)
-        ui_text = self.folder_navigator.start_folder_selection(user_id, messages_to_download, {'video': 0, 'photo': 0, 'document': 0})
-
-        info_text = f"📊 找到 {len(messages_to_download)} 個媒體文件\n"
-        info_text += f"影片: {counts['video']} 個, 照片: {counts['photo']} 個, 檔案: {counts['document']} 個\n\n"
-        info_text += ui_text + "\n\n"
-        info_text += (
-            "命令說明:\n"
-            "• /cr <名稱> - 創建資料夾\n"
-            "• /cd <名稱> - 進入資料夾\n"
-            "• /cd.. - 返回上級\n"
-            "• /ok - 確認位置並開始下載"
+        nav_text, markup = self.folder_navigator.start_folder_selection(
+            user_id, messages_to_download, {'video': 0, 'photo': 0, 'document': 0}
         )
 
-        await processing_msg.edit_text(info_text)
+        info_text = (
+            f"📊 找到 {len(messages_to_download)} 個媒體文件\n"
+            f"影片: {counts['video']} 個, 照片: {counts['photo']} 個, 檔案: {counts['document']} 個\n\n"
+            f"{nav_text}"
+        )
+
+        await processing_msg.edit_text(info_text, reply_markup=markup)
+
+    # ---------------------- callback query handling ----------------------
+    async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user_id = query.from_user.id
+        data = query.data or ""
+
+        await query.answer()
+
+        if not data.startswith("fn_"):
+            return
+
+        if not self.folder_navigator.is_awaiting_folder_selection(user_id):
+            await query.answer("此操作已過期，請重新發送媒體文件", show_alert=True)
+            return
+
+        try:
+            if data == "fn_up":
+                text, markup = self.folder_navigator.navigate_up(user_id)
+                await query.message.edit_text(text, reply_markup=markup)
+
+            elif data == "fn_ok":
+                display_path, _ = self.folder_navigator.confirm_selection(user_id)
+                pending = self.folder_navigator.get_pending_messages(user_id)
+                await query.message.edit_text(f"📁 已確認存放位置: {display_path}\n🚀 開始下載...")
+                if pending:
+                    await self._start_download_with_selected_folder(user_id, query.message, pending)
+                self.folder_navigator.clear_user_state(user_id)
+
+            elif data.startswith("fn_cd:"):
+                index = int(data[6:])
+                text, markup = self.folder_navigator.navigate_into(user_id, index)
+                await query.message.edit_text(text, reply_markup=markup)
+
+            elif data.startswith("fn_prev:"):
+                index = int(data[8:])
+                text, markup = self.folder_navigator.navigate_to_history(user_id, index)
+                await query.message.edit_text(text, reply_markup=markup)
+
+            elif data == "fn_cr":
+                state = self.folder_navigator.get_user_state(user_id)
+                state.nav_message = query.message
+                self.folder_navigator.set_awaiting_folder_name(user_id, True)
+                await query.message.edit_text(
+                    "📝 請輸入新資料夾名稱：\n直接發送一則文字訊息即可",
+                    reply_markup=None
+                )
+
+        except Exception as e:
+            logger.error(f"處理資料夾按鈕回調時出錯: {e}")
 
     # ---------------------- message handling ----------------------
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message
         user_id = msg.from_user.id
 
-        # folder commands
-        if msg.text and self.folder_navigator.is_folder_command(msg.text):
-            response, confirmed = self.folder_navigator.process_folder_command(user_id, msg.text)
-            await msg.reply_text(response)
-            if confirmed:
-                pending = self.folder_navigator.get_pending_messages(user_id)
-                if pending:
-                    await self._start_download_with_selected_folder(update, context, pending)
-                self.folder_navigator.clear_user_state(user_id)
+        # Handle new folder name input
+        if self.folder_navigator.is_awaiting_folder_name(user_id) and msg.text:
+            folder_name = msg.text.strip()
+            state = self.folder_navigator.get_user_state(user_id)
+            text, markup = self.folder_navigator.create_folder_and_navigate(user_id, folder_name)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            nav_msg = state.nav_message
+            if nav_msg:
+                await nav_msg.edit_text(text, reply_markup=markup)
+            else:
+                await msg.reply_text(text, reply_markup=markup)
             return
 
         if self.folder_navigator.is_awaiting_folder_selection(user_id):
-            await msg.reply_text('請使用資料夾命令: /cr 創建資料夾, /cd 進入資料夾, /cd.. 返回上級, /ok 確認位置')
+            await msg.reply_text('請使用上方的按鈕選擇資料夾位置')
             return
 
         # require forwarded message
         if not msg.forward_origin:
             await msg.reply_text(
                 '請轉發一則訊息給我，我會備份該訊息及其所有回覆中的媒體文件到伺服器！\n\n'
-                '支援的媒體類型：照片、影片、GIF、音訊等\n\n'
-                '資料夾命令:\n'
-                '• /cr <名稱> - 創建資料夾\n'
-                '• /cd <名稱> - 進入資料夾\n'
-                '• /cd.. - 返回上級目錄\n'
-                '• /ok - 確認當前位置並開始下載'
+                '支援的媒體類型：照片、影片、GIF、音訊等'
             )
             return
         
@@ -473,12 +521,8 @@ class TelegramMediaBot:
             await processing_msg.edit_text(f'❌ 處理時出錯: {e}')
 
     # ---------------------- download flow ----------------------
-    async def _start_download_with_selected_folder(self, update: Update, context: ContextTypes.DEFAULT_TYPE, messages_to_download: list):
-        message = update.message
-        user_id = message.from_user.id
+    async def _start_download_with_selected_folder(self, user_id: int, processing_msg, messages_to_download: list):
         selected_folder = self.folder_navigator.get_selected_path(user_id)
-        processing_msg = await message.reply_text('🚀 開始下載到選定的資料夾...')
-
         try:
             os.makedirs(selected_folder, exist_ok=True)
             original_message_id = messages_to_download[0].id if messages_to_download else 0
