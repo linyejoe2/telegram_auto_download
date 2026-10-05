@@ -23,6 +23,12 @@ _X_RE = re.compile(
     re.IGNORECASE
 )
 
+# Pornhub patterns (any region subdomain, view_video or interstitial)
+_PORNHUB_RE = re.compile(
+    r'https?://([a-z]{2}\.)?pornhub\.com/(view_video\.php\?viewkey=|interstitial\?viewkey=|embed/)[\w]+',
+    re.IGNORECASE
+)
+
 
 def extract_url(text: str) -> Optional[str]:
     """Return the first HTTP(S) URL found in text, or None."""
@@ -38,6 +44,8 @@ def detect_type(url: str) -> Optional[str]:
         return 'youtube'
     if _X_RE.match(url):
         return 'x'
+    if _PORNHUB_RE.match(url):
+        return 'pornhub'
     return None
 
 
@@ -60,7 +68,12 @@ async def handle_url(url: str, url_type: str, user_id: int, processing_msg, fold
         await XDownloader().start_flow(url, user_id, processing_msg, folder_navigator)
         return True
 
-    await processing_msg.edit_text("❌ 不支援的連結類型，目前支援 YouTube 及 X (Twitter)")
+    if url_type == 'pornhub':
+        from .p_downloader import PDownloader
+        await PDownloader().start_flow(url, user_id, processing_msg, folder_navigator)
+        return True
+
+    await processing_msg.edit_text("❌ 不支援的連結類型，目前支援 YouTube、X (Twitter)、P站")
     return False
 
 
@@ -83,5 +96,8 @@ async def download_confirmed(
     elif url_type == 'x':
         from .x_downloader import XDownloader
         await XDownloader().download(url, selected_path, processing_msg)
+    elif url_type == 'pornhub':
+        from .p_downloader import PDownloader
+        await PDownloader().download(url, selected_path, processing_msg)
     else:
         await processing_msg.edit_text(f"❌ 不支援的下載類型: {url_type}")

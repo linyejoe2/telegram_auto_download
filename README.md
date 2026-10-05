@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.3.0
+# Telegram Auto Download Bot v2.4.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -21,13 +21,16 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 - **⚡ High Performance**  
   Concurrent downloads (up to 5), real-time metrics, and progress display.
 
+- **🌐 URL Video Downloader**  
+  Send a YouTube, X (Twitter), or Pornhub link — the bot fetches metadata, lets you pick a folder, then downloads with live progress.
+
 ---
 
 ## 🚀 Quick Start
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.3.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.4.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -101,6 +104,20 @@ Forward any media to the bot. An inline keyboard appears automatically:
 | `🕐 /prev/path` | Jump to a previously used path |
 
 Up to 5 previously confirmed paths are remembered and shown as quick-select buttons.
+
+## 🌐 URL Video Download
+
+Send any supported video URL directly to the bot (no forwarding needed):
+
+| Platform | Example URL |
+|---|---|
+| YouTube | `https://youtu.be/...` · `https://youtube.com/watch?v=...` · `/shorts/...` |
+| X / Twitter | `https://x.com/i/status/...` · `https://twitter.com/.../status/...` |
+| Pornhub | `https://www.pornhub.com/view_video.php?viewkey=...` · `interstitial?viewkey=...` |
+
+The bot fetches metadata (title, duration, size), then shows the folder selection keyboard. After confirming, it downloads the video, computes a perceptual hash for duplicate detection, and records it in the database.
+
+> **Note:** X and Pornhub downloads use Firefox browser cookies for authentication. Make sure you are logged in to those sites in Firefox on the same machine.
 
 ## 📄 License & Disclaimer
 

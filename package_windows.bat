@@ -12,7 +12,7 @@ set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
 REM ===== Version constant =====
-set "APP_VERSION=2.3.0"
+set "APP_VERSION=2.4.0"
 REM ============================
 
 REM Check Python installation

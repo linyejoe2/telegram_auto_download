@@ -1,5 +1,25 @@
 # ChangeLog
 
+## 2.4.0
+
+- **URL Video Downloader** — send any supported URL directly to the bot to download:
+  - YouTube (`youtube.com/watch`, `/shorts`, `youtu.be`)
+  - X / Twitter (`x.com/.../status/...`, `twitter.com/.../status/...`)
+  - Pornhub (`pornhub.com/view_video.php?viewkey=...`, `interstitial?viewkey=...` auto-converted)
+  - Folder selection keyboard appears after metadata is fetched, same UX as Telegram media
+  - Real-time download progress updates every 3 seconds (%, speed MB/s)
+- **pHash Duplicate Detection for URL Downloads**:
+  - `src/phasher.get_video_phash_from_path()` computes hash directly from file path (no memory load)
+  - Hash used as `file_unique_id` in the database; duplicate files are rejected and removed
+  - Graceful fallback to `{prefix}_{size}_{url_hash}` when cv2/ImageHash not installed
+- **`web/` Package** — modular URL downloader architecture:
+  - `web/url_parser.py` — URL detection (`extract_url`, `detect_type`) and dispatch (`handle_url`, `download_confirmed`)
+  - `web/youtube_downloader.py` — YouTube via yt-dlp, best mp4 format
+  - `web/x_downloader.py` — X/Twitter via yt-dlp with Firefox cookie passthrough
+  - `web/p_downloader.py` — Pornhub via yt-dlp; `_interstitial_transfer()` normalises interstitial URLs to `view_video.php`
+- **`src/folder_navigator.py`**: added `pending_url` and `url_type` fields to `NavigationState` for URL download flow
+- **Dependencies**: added `yt-dlp`, `opencv-python`, `ImageHash`, `numpy`
+
 ## 2.1.0
 
 - **Inline Keyboard Folder Navigation** (v2.1.0):
