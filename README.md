@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.4.2
+# Telegram Auto Download Bot v2.5.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -24,13 +24,16 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 - **🌐 URL Video Downloader**  
   Send a YouTube, X (Twitter), or Pornhub link — the bot fetches metadata, lets you pick a folder, then downloads with live progress.
 
+- **🐦 X Account Download**  
+  Send `https://x.com/<user>` — the bot scans the account, reports post/video/photo counts, then downloads all media and/or screenshots of posts.
+
 ---
 
 ## 🚀 Quick Start
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.4.2.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.5.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -118,6 +121,22 @@ Send any supported video URL directly to the bot (no forwarding needed):
 The bot fetches metadata (title, duration, size), then shows the folder selection keyboard. After confirming, it downloads the video, computes a perceptual hash for duplicate detection, and records it in the database.
 
 > **Note:** X and Pornhub downloads use Firefox browser cookies for authentication. Make sure you are logged in to those sites in Firefox on the same machine.
+
+## 🐦 X Account Download
+
+Send an account URL (`https://x.com/<user>`, also `/media`, `/with_replies`, `/tweets`). The bot scans the account with gallery-dl (Firefox cookies, ~3,200 post timeline limit; large accounts can take several minutes) and replies with counts: 文章 N 篇 (含媒體 M 篇) / 影片 N 部 / 照片 N 張. Retweets are excluded.
+
+Then choose a mode with the inline buttons:
+
+| Button | Action |
+|---|---|
+| `⬇️ 下載媒體` | Download photos and videos |
+| `⬇️📸 下載媒體 + 截圖` | Download media and screenshot each media post |
+| `📸 只截圖` | Screenshots only |
+
+After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<username>/` (screenshots in `screenshots/`). Media files are named `<tweetid>_<n>.<ext>` and duplicates are skipped. Posts without media are counted but never downloaded or screenshotted.
+
+> **Note:** You must be logged in to X in Firefox on the same machine. Screenshots require a one-time Chromium install: `playwright install chromium` (not bundled in the installer; media download works without it).
 
 ## 📄 License & Disclaimer
 

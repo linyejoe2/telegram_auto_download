@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.4.2) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.5.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -70,6 +70,13 @@ setup_build_env.bat
 - **src/folder_navigator.py**: Interactive folder navigation and path management system
 - **config/config.py**: Configuration management using environment variables from `.env` file
 
+### URL Downloader Components (web/ package)
+- **web/url_parser.py**: URL detection (`extract_url`, `detect_type`, `extract_x_username`) and dispatch (`handle_url`, `download_confirmed`); types include `youtube`, `x`, `pornhub`, `x_profile` (v2.5.0)
+- **web/youtube_downloader.py**: YouTube via yt-dlp
+- **web/x_downloader.py**: X/Twitter single-post video via yt-dlp with Firefox cookies
+- **web/p_downloader.py**: Pornhub via yt-dlp
+- **web/x_profile_downloader.py**: X account downloader (gallery-dl scan + media download + Playwright screenshots, v2.5.0)
+
 ### Windows Installer Components
 - **package_windows.bat**: Complete build automation script (v1.0.0)
 - **telegram_bot.spec**: PyInstaller configuration for executable creation (v1.0.0)
@@ -122,7 +129,7 @@ setup_build_env.bat
 Main orchestration class that coordinates all bot operations:
 - `start_client()`: Enhanced authentication with session validation and GUI support (v1.0.0)
 - `handle_message()`: Processes forwarded messages, folder name input, and routes to group/single processing
-- `handle_callback_query()`: Routes inline keyboard button presses (`fn_cd`, `fn_up`, `fn_ok`, `fn_cr`, `fn_prev`) (v2.1.0)
+- `handle_callback_query()`: Routes inline keyboard button presses (`fn_cd`, `fn_up`, `fn_ok`, `fn_cr`, `fn_prev`) (v2.1.0); `xp_media` / `xp_both` / `xp_shot` (X profile mode choice) are routed to `XProfileDownloader.on_mode_chosen` before the `fn_*` guard (v2.5.0)
 - `_handle_media_group()`: Collects and processes media group messages
 - `_download_and_monitor()`: Shared download and monitoring logic
 - `get_message_and_replies()`: Retrieves original message and replies using Telethon with enhanced error handling
@@ -155,6 +162,13 @@ Inline keyboard folder navigation and path management (v2.1.0):
 - `is_awaiting_folder_selection()` / `is_awaiting_folder_name()`: State guards for message routing
 - `clear_user_state()`: Resets navigation state while preserving path history
 
+#### `XProfileDownloader` (web/x_profile_downloader.py)
+Downloads media and/or screenshots of a whole X account (v2.5.0):
+- `start_flow(username, user_id, processing_msg)`: Scans the account with gallery-dl (in-process `gallery_dl.job.DataJob`, Firefox cookies; ~3,200 post limit; retweets excluded), replies with post/video/photo counts and the mode buttons (`xp_media`, `xp_both`, `xp_shot`)
+- `on_mode_chosen(mode, user_id, message, folder_navigator)`: Stores the mode, shows the folder keyboard (`url_type = 'x_profile'`)
+- `download(user_id, dest_dir, processing_msg)`: Output to `<folder>/x_<username>/` (screenshots in `screenshots/`); media concurrent (5), named `<tweetid>_<n>.<ext>`, deduped by file existence and DB id `xprofile_<tweetid>_<n>`; screenshots via Playwright Chromium (3 concurrent); posts without media are never downloaded/screenshotted
+- Notes: gallery-dl must run in-process (frozen exe's `sys.executable` is the app, so `python -m gallery_dl` fails). Requires being logged in to X in Firefox. Screenshots need one-time `playwright install chromium` (not bundled by PyInstaller; media download works without it)
+
 #### `AuthHelper` (src/auth_helper.py)
 GUI and console authentication management (v1.0.0):
 - `authenticate_client()`: Main authentication function with session handling
@@ -172,6 +186,10 @@ The bot requires these environment variables in `.env`:
 - `PHONE_NUMBER`: Phone number for Telegram client authentication
 - `BOT_TOKEN`: Bot token from @BotFather
 
+Additional requirements for X features (v2.5.0):
+- Log in to X in Firefox on the same machine (cookies are read from Firefox for X downloads and account scans)
+- For X account screenshots, run `playwright install chromium` once (not bundled by PyInstaller)
+
 ### File Structure
 
 ```
@@ -186,6 +204,13 @@ telegram_auto_download/
 │   ├── auth_helper.py          # GUI/console authentication helper (197 lines, v1.0.0)
 │   ├── ui.py                   # Main GUI application (tkinter interface, v1.3.0)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)
+├── web/
+│   ├── __init__.py
+│   ├── url_parser.py           # URL detection and dispatch
+│   ├── youtube_downloader.py   # YouTube (yt-dlp)
+│   ├── x_downloader.py         # X/Twitter single post (yt-dlp)
+│   ├── p_downloader.py         # Pornhub (yt-dlp)
+│   └── x_profile_downloader.py # X account downloader (gallery-dl + Playwright, v2.5.0)
 ├── config/
 │   └── config.py               # Configuration management
 ├── main.py                     # Unified application entry point (CLI/GUI)

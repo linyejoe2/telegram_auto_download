@@ -338,6 +338,13 @@ class TelegramMediaBot:
 
         await query.answer()
 
+        if data in ("xp_media", "xp_both", "xp_shot"):
+            from web.x_profile_downloader import XProfileDownloader
+            await XProfileDownloader().on_mode_chosen(
+                data, user_id, query.message, self.folder_navigator
+            )
+            return
+
         if not data.startswith("fn_"):
             return
 

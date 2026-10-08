@@ -23,6 +23,24 @@ _X_RE = re.compile(
     re.IGNORECASE
 )
 
+# X / Twitter profile URL (x.com/<user>, optionally /media /with_replies /tweets)
+_X_PROFILE_RE = re.compile(
+    r'https?://(www\.)?(x\.com|twitter\.com)/(?P<user>\w{1,15})/?(media|with_replies|tweets)?/?(\?\S*)?$',
+    re.IGNORECASE
+)
+_X_RESERVED = {
+    'home', 'i', 'explore', 'search', 'settings', 'notifications', 'messages',
+    'compose', 'intent', 'share', 'hashtag', 'login', 'signup', 'tos', 'privacy',
+}
+
+
+def extract_x_username(url: str) -> Optional[str]:
+    m = _X_PROFILE_RE.match(url)
+    if m and m.group('user').lower() not in _X_RESERVED:
+        return m.group('user')
+    return None
+
+
 # Pornhub patterns (any region subdomain, view_video or interstitial)
 _PORNHUB_RE = re.compile(
     r'https?://([a-z]{2}\.)?pornhub\.com/(view_video\.php\?viewkey=|interstitial\?viewkey=|embed/)[\w]+',
@@ -46,6 +64,8 @@ def detect_type(url: str) -> Optional[str]:
         return 'x'
     if _PORNHUB_RE.match(url):
         return 'pornhub'
+    if extract_x_username(url):
+        return 'x_profile'
     return None
 
 
@@ -66,6 +86,11 @@ async def handle_url(url: str, url_type: str, user_id: int, processing_msg, fold
     if url_type == 'x':
         from .x_downloader import XDownloader
         await XDownloader().start_flow(url, user_id, processing_msg, folder_navigator)
+        return True
+
+    if url_type == 'x_profile':
+        from .x_profile_downloader import XProfileDownloader
+        await XProfileDownloader().start_flow(extract_x_username(url), user_id, processing_msg)
         return True
 
     if url_type == 'pornhub':
@@ -96,6 +121,9 @@ async def download_confirmed(
     elif url_type == 'x':
         from .x_downloader import XDownloader
         await XDownloader().download(url, selected_path, processing_msg)
+    elif url_type == 'x_profile':
+        from .x_profile_downloader import XProfileDownloader
+        await XProfileDownloader().download(user_id, selected_path, processing_msg)
     elif url_type == 'pornhub':
         from .p_downloader import PDownloader
         await PDownloader().download(url, selected_path, processing_msg)

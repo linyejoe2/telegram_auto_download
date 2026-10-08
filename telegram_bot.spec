@@ -118,6 +118,10 @@ hiddenimports = [
     'numpy',
 ]
 
+# X profile downloader (extractors are loaded dynamically)
+hiddenimports += collect_submodules('gallery_dl')
+hiddenimports += collect_submodules('playwright')
+
 # Collect data files
 datas = [
     # Include config directory
@@ -140,6 +144,11 @@ except Exception:
 
 try:
     datas += collect_data_files('certifi')
+except Exception:
+    pass
+
+try:
+    datas += collect_data_files('playwright')  # bundled node driver
 except Exception:
     pass
 
