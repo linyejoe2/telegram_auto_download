@@ -12,7 +12,7 @@ set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
 REM ===== Version constant =====
-set "APP_VERSION=2.4.0"
+set "APP_VERSION=2.4.2"
 REM ============================
 
 REM Check Python installation
@@ -66,6 +66,8 @@ echo [5/10] Installing build dependencies...
 python -m pip install --upgrade pip
 pip install --upgrade setuptools wheel
 pip install -r requirements.txt
+REM yt-dlp must be latest: X/YouTube change their APIs often and old versions break
+pip install --upgrade yt-dlp
 pip install pyinstaller
 
 if errorlevel 1 (
