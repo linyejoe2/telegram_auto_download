@@ -1,6 +1,9 @@
 @echo off
 REM Telegram Auto Download Bot - Complete Windows Package Builder
-REM This script handles the complete build process from source to installer
+REM Builds the executable with PyInstaller, then the installer with Inno Setup.
+REM Any failing step stops the build immediately.
+
+setlocal
 
 echo ====================================
 echo Telegram Auto Download Bot
@@ -15,156 +18,129 @@ REM ===== Version constant =====
 set "APP_VERSION=2.5.0"
 REM ============================
 
-REM Check Python installation
-echo [1/10] Checking Python installation...
-python --version >nul 2>&1
+set "EXE_PATH=dist\TelegramAutoDownload\TelegramAutoDownload.exe"
+set "INSTALLER_PATH=installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe"
+
+REM [1/8] Python
+echo [1/8] Checking Python installation...
+python --version
 if errorlevel 1 (
-    call :display_error "Python is not installed or not in PATH. Please install Python 3.8+ and try again."
+    call :fail "Python is not installed or not in PATH. Please install Python 3.8+ and try again."
     goto :end
 )
-python --version
 
-REM Check Git (optional)
-echo [2/10] Checking project status...
-git --version >nul 2>&1
-if not errorlevel 1 (
-    echo Git found. Checking repository status...
-    git status --porcelain >nul 2>&1
-    if not errorlevel 1 (
-        echo Repository is clean.
-    ) else (
-        echo Warning: Not in a git repository or uncommitted changes.
+REM [2/8] Clean (build_env is recreated so the bundle always matches requirements.txt)
+echo [2/8] Cleaning previous builds...
+for %%D in (build dist installer_output build_env) do (
+    if exist "%%D" rmdir /s /q "%%D"
+    if exist "%%D" (
+        call :fail "Could not remove %%D\. A file in it is in use - close any running installer, the app or Explorer window using it and try again."
+        goto :end
     )
-) else (
-    echo Git not found - skipping repository checks.
 )
-
-REM Clean previous builds
-echo [3/10] Cleaning previous builds...
-if exist "build" rmdir /s /q "build"
-if exist "dist" rmdir /s /q "dist"
-if exist "installer_output" rmdir /s /q "installer_output"
-@REM if exist "build_env" rmdir /s /q "build_env"
 REM Keep our custom telegram_bot.spec file - only delete auto-generated ones
 for %%f in (*.spec) do (
     if not "%%f"=="telegram_bot.spec" del "%%f"
 )
 if exist "version_info.txt" del "version_info.txt"
 
-REM Create and activate virtual environment
-echo [4/10] Setting up build environment...
+REM [3/8] Virtual environment
+echo [3/8] Setting up build environment...
 python -m venv build_env
-if not exist "build_env\Scripts\activate.bat" (
-    call :display_error "Failed to create virtual environment."
-    goto :end
-)
-
-call build_env\Scripts\activate.bat
-
-REM Install build dependencies
-echo [5/10] Installing build dependencies...
-python -m pip install --upgrade pip
-pip install --upgrade setuptools wheel
-pip install -r requirements.txt
-REM yt-dlp must be latest: X/YouTube change their APIs often and old versions break
-pip install --upgrade yt-dlp
-pip install pyinstaller
-
 if errorlevel 1 (
-    call :display_error "Failed to install dependencies."
+    call :fail "Failed to create virtual environment."
+    goto :end
+)
+call build_env\Scripts\activate.bat
+if errorlevel 1 (
+    call :fail "Failed to activate virtual environment."
     goto :end
 )
 
-REM Create version info and icon
-echo [6/10] Creating application assets...
+REM [4/8] Dependencies
+echo [4/8] Installing build dependencies...
+python -m pip install --upgrade pip setuptools wheel
+if errorlevel 1 (
+    call :fail "Failed to upgrade pip/setuptools/wheel."
+    goto :end
+)
+python -m pip install -r requirements.txt
+if errorlevel 1 (
+    call :fail "Failed to install requirements.txt."
+    goto :end
+)
+REM yt-dlp must be latest: X/YouTube change their APIs often and old versions break
+python -m pip install --upgrade yt-dlp pyinstaller
+if errorlevel 1 (
+    call :fail "Failed to install yt-dlp / pyinstaller."
+    goto :end
+)
+
+REM [5/8] Assets
+echo [5/8] Creating application assets...
 python create_version_info.py
 if errorlevel 1 (
-    call :display_error "Failed to create version info."
+    call :fail "Failed to create version info."
     goto :end
 )
-
 python create_icon.py
 if errorlevel 1 (
-    call :display_error "Failed to create application icon."
+    call :fail "Failed to create application icon."
     goto :end
 )
 
-REM Test the application before building
-echo [7/10] Testing application syntax...
-
+REM [6/8] Syntax check
+echo [6/8] Testing application syntax...
 python -m py_compile main.py
 if errorlevel 1 (
-    call :display_error "GUI launcher syntax errors detected."
+    call :fail "Syntax errors detected in main.py."
     goto :end
 )
 
-echo Application syntax check passed.
-
-REM Build executable
-echo [8/10] Building Windows executable...
-
-REM Check if spec file exists, create if missing
+REM [7/8] Executable
+echo [7/8] Building Windows executable...
 if not exist "telegram_bot.spec" (
-    echo Warning: telegram_bot.spec not found, creating default spec file...
-    pyinstaller --onedir --windowed --name=TelegramAutoDownload --icon=assets/icon.ico --version-file=version_info.txt run_gui.py
-    if not exist "TelegramAutoDownload.spec" (
-        call :display_error "Failed to create spec file automatically."
-        goto :end
-    )
-    ren "TelegramAutoDownload.spec" "telegram_bot.spec"
-)
-
-pyinstaller telegram_bot.spec --clean --noconfirm
-
-if not exist "dist\TelegramAutoDownload\TelegramAutoDownload.exe" (
-    call :display_error "Executable build failed."
+    call :fail "telegram_bot.spec not found."
     goto :end
 )
-
+pyinstaller telegram_bot.spec --clean --noconfirm
+if errorlevel 1 (
+    call :fail "PyInstaller failed."
+    goto :end
+)
+if not exist "%EXE_PATH%" (
+    call :fail "Executable build failed: %EXE_PATH% not found."
+    goto :end
+)
 echo Executable built successfully.
 
-REM Test the executable (quick test)
-echo [9/10] Testing executable...
-REM Note: This might not work for GUI apps, but we'll try
-
-echo Testing complete.
-
-REM Build installer
-echo [10/10] Building Windows installer...
-
-REM Check for Inno Setup
+REM [8/8] Installer
+echo [8/8] Building Windows installer...
 set "INNO_SETUP_PATH="
-if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" (
-    set "INNO_SETUP_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-) else if exist "C:\Program Files\Inno Setup 6\ISCC.exe" (
-    set "INNO_SETUP_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
-) else if exist "C:\Program Files (x86)\Inno Setup 5\ISCC.exe" (
-    set "INNO_SETUP_PATH=C:\Program Files (x86)\Inno Setup 5\ISCC.exe"
-) else if exist "C:\Program Files\Inno Setup 5\ISCC.exe" (
-    set "INNO_SETUP_PATH=C:\Program Files\Inno Setup 5\ISCC.exe"
+for %%P in (
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+    "C:\Program Files (x86)\Inno Setup 5\ISCC.exe"
+    "C:\Program Files\Inno Setup 5\ISCC.exe"
+) do (
+    if not defined INNO_SETUP_PATH if exist %%P set "INNO_SETUP_PATH=%%~P"
 )
 
-if "%INNO_SETUP_PATH%"=="" (
-    echo Warning: Inno Setup not found. Skipping installer creation.
-    echo You can install Inno Setup from: https://jrsoftware.org/isinfo.php
-    echo Then run build_installer.bat to create the installer.
-) else (
-    if not exist "installer_output" mkdir installer_output
-    "%INNO_SETUP_PATH%" installer.iss
-    
-    if exist "installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe" (
-        echo Installer created successfully!
-    ) else (
-        echo Warning: Installer creation failed.
-        set "ERROR_OCCURRED=1"
-    )
+if not defined INNO_SETUP_PATH (
+    call :fail "Inno Setup not found. Install it from https://jrsoftware.org/isinfo.php and run again."
+    goto :end
 )
 
-set "END_TIME=%TIME%"
-echo Build started at: %START_TIME%
-echo Build ended at: %END_TIME%
-echo.
-@REM pause
+"%INNO_SETUP_PATH%" installer.iss
+if errorlevel 1 (
+    call :fail "Inno Setup failed."
+    goto :end
+)
+if not exist "%INSTALLER_PATH%" (
+    call :fail "Installer creation failed: %INSTALLER_PATH% not found."
+    goto :end
+)
+echo Installer created successfully!
 
 :end
 echo.
@@ -173,26 +149,26 @@ if "%ERROR_OCCURRED%"=="0" (
     echo BUILD COMPLETED SUCCESSFULLY!
     echo ====================================
     echo.
+    echo Build started at: %START_TIME%
+    echo Build ended at:   %TIME%
+    echo.
     echo Created files:
-    echo - Executable: dist\TelegramAutoDownload\TelegramAutoDownload.exe
-    if exist "installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe" (
-        echo - Installer: installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe
-    )
-    echo.
-    echo File sizes:
-    if exist "dist\TelegramAutoDownload\TelegramAutoDownload.exe" (
-        for %%A in ("dist\TelegramAutoDownload\TelegramAutoDownload.exe") do echo   Executable: %%~zA bytes
-    )
-    if exist "installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe" (
-        for %%A in ("installer_output\TelegramAutoDownload-Setup-v%APP_VERSION%.exe") do echo   Installer: %%~zA bytes
-    )
-    echo.
-    echo Distribution files are ready!
+    for %%A in ("%EXE_PATH%") do echo - Executable: %%~fA ^(%%~zA bytes^)
+    for %%A in ("%INSTALLER_PATH%") do echo - Installer:  %%~fA ^(%%~zA bytes^)
 ) else (
     echo BUILD FAILED!
     echo ====================================
     echo.
     echo Please check the errors above and try again.
-    echo.
 )
+echo.
 pause
+if "%ERROR_OCCURRED%"=="1" exit /b 1
+exit /b 0
+
+REM ===== Subroutines =====
+:fail
+set "ERROR_OCCURRED=1"
+echo.
+echo ERROR: %~1
+exit /b 0
