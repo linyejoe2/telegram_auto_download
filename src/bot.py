@@ -656,6 +656,10 @@ class TelegramMediaBot:
         except Exception as e:
             logger.error(f'Bot 運行出錯: {e}')
         finally:
-            await self.app.stop()
+            # Stop polling first so a restarted bot doesn't hit a polling Conflict
+            if self.app.updater and self.app.updater.running:
+                await self.app.updater.stop()
+            if self.app.running:
+                await self.app.stop()
             await self.app.shutdown()
             await self.client.disconnect()

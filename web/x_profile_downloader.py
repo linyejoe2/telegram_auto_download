@@ -235,8 +235,10 @@ class XProfileDownloader:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            return 0, 0, "未安裝 playwright：pip install playwright && playwright install chromium"
+            return 0, 0, "未安裝 playwright 函式庫"
 
+        from src.chromium_helper import ensure_browsers_path
+        ensure_browsers_path()
         os.makedirs(shot_dir, exist_ok=True)
         cookies = await asyncio.get_event_loop().run_in_executor(None, _load_cookies)
         ids = scan.media_post_ids
@@ -248,7 +250,7 @@ class XProfileDownloader:
             try:
                 browser = await pw.chromium.launch(headless=True)
             except Exception as e:
-                return 0, 0, f"無法啟動 Chromium，請執行 playwright install chromium（{str(e)[:80]}）"
+                return 0, 0, f"無法啟動 Chromium，請在應用程式設定頁按 Chromium 的 Install 按鈕（{str(e)[:80]}）"
             context = await browser.new_context(
                 viewport={'width': 800, 'height': 1200}, color_scheme='light',
                 device_scale_factor=2, locale='zh-TW',

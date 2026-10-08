@@ -9,6 +9,7 @@ from dotenv import load_dotenv, set_key
 import pystray
 from PIL import Image, ImageDraw, ImageTk
 import asyncio
+import importlib
 import subprocess
 import platform
 import sys
@@ -17,13 +18,8 @@ import time
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import the main CLI function
-try:
-    from main import main as bot_main
-except ImportError:
-    # Handle circular import by importing at runtime
-    bot_main = None
-from .bot import log_queue
+from .bot import log_queue, TelegramMediaBot
+import config.config as bot_config
 from .database import DatabaseManager
 from config.config import validate_config
 
@@ -51,6 +47,8 @@ class TelegramBotGUI:
         # Bot control
         self.bot_running = False
         self.bot_thread = None
+        self.bot_loop = None
+        self.bot_task = None
         self.log_queue = queue.Queue()
         
         # Auto-start preference
@@ -70,6 +68,7 @@ class TelegramBotGUI:
         
         # Initialize database displays
         self.root.after(500, self.init_database_displays)
+        self.root.after(1000, self.check_chromium_status)
         
         self.database_update_thread = threading.Thread(target=self.refresh_database, daemon=True)
         
@@ -120,7 +119,10 @@ class TelegramBotGUI:
         
         self.stop_button = ttk.Button(button_frame, text="Stop Bot", command=self.stop_bot, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
-        
+
+        self.restart_button = ttk.Button(button_frame, text="Restart Bot", command=self.restart_bot)
+        self.restart_button.pack(side=tk.LEFT, padx=5)
+
         # Auto-start checkbox
         ttk.Checkbutton(button_frame, text="Auto-start on launch", variable=self.auto_start_var).pack(side=tk.LEFT, padx=20)
         
@@ -166,6 +168,18 @@ class TelegramBotGUI:
         ttk.Entry(bot_config_frame, textvariable=self.bot_token_var, width=30, show="*").grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
         
         ttk.Button(bot_config_frame, text="Save Bot Configuration", command=self.save_bot_config).grid(row=4, column=0, columnspan=2, pady=10, sticky=tk.W)
+
+        # Chromium (used for X post screenshots)
+        chromium_frame = ttk.LabelFrame(parent, text="Screenshot Engine", padding="10")
+        chromium_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.chromium_status_label = ttk.Label(chromium_frame, text="Chromium status: Not checked")
+        self.chromium_status_label.pack(side=tk.LEFT)
+
+        self.chromium_check_button = ttk.Button(chromium_frame, text="Check", command=self.check_chromium_status)
+        self.chromium_check_button.pack(side=tk.RIGHT, padx=5)
+        self.chromium_install_button = ttk.Button(chromium_frame, text="Install", command=self.install_chromium)
+        self.chromium_install_button.pack(side=tk.RIGHT, padx=5)
 
     def setup_log_tab(self, parent):
         """Setup logs tab"""
@@ -357,6 +371,44 @@ class TelegramBotGUI:
         self.phone_var.set(os.getenv('PHONE_NUMBER', ''))
         self.bot_token_var.set(os.getenv('BOT_TOKEN', ''))
 
+    def _set_chromium_status(self, status, busy=False):
+        """Update the Chromium status label and buttons (call on the Tk thread)."""
+        self.chromium_status_label.config(text=f"Chromium status: {status}")
+        state = tk.DISABLED if busy else tk.NORMAL
+        self.chromium_check_button.config(state=state)
+        self.chromium_install_button.config(state=state)
+
+    def check_chromium_status(self):
+        """Check in the background whether Chromium can be launched"""
+        from .chromium_helper import check_chromium
+        self._set_chromium_status("Checking...", busy=True)
+
+        def work():
+            _, status = check_chromium()
+            self.root.after(0, lambda: self._set_chromium_status(status))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def install_chromium(self):
+        """Download Chromium in the background, then re-check"""
+        from .chromium_helper import install_chromium, check_chromium
+        self._set_chromium_status("Installing... (this may take a few minutes)", busy=True)
+
+        def work():
+            ok, message = install_chromium(
+                lambda line: self.root.after(
+                    0, lambda l=line: self._set_chromium_status(f"Installing... {l[:60]}", busy=True)
+                )
+            )
+            if ok:
+                _, status = check_chromium()
+            else:
+                status = message
+                logging.error(f"Chromium install failed: {message}")
+            self.root.after(0, lambda: self._set_chromium_status(status))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def browse_downloads_path(self):
         """Browse for downloads directory"""
         directory = filedialog.askdirectory(
@@ -409,71 +461,96 @@ class TelegramBotGUI:
     def start_bot(self):
         """Start the Telegram bot"""
         try:
-            # Validate configuration
-            load_dotenv()  # Reload environment variables
-            validate_config()
-            
             if self.bot_running:
                 messagebox.showwarning("Warning", "Bot is already running!")
                 return
-            
+
+            # Reload .env so credentials saved since launch are used
+            load_dotenv(override=True)
+            importlib.reload(bot_config)
+            validate_config()
+
             # Start bot in separate thread
             self.bot_thread = threading.Thread(target=self.run_bot, daemon=True)
             self.bot_thread.start()
-            
+
             # Update UI
             self.bot_running = True
             self.status_label.config(text="Running", foreground="green")
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
-            
+            self.restart_button.config(state=tk.NORMAL)
+
             logging.info("Bot started successfully")
-            
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start bot: {str(e)}")
             logging.error(f"Failed to start bot: {e}")
 
-    def stop_bot(self):
-        """Stop the Telegram bot"""
-        try:
-            if not self.bot_running:
-                messagebox.showwarning("Warning", "Bot is not running!")
-                return
-            
-            # Update UI
-            self.bot_running = False
-            self.status_label.config(text="Stopped", foreground="red")
-            self.start_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.DISABLED)
-            
-            logging.info("Bot stopped")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to stop bot: {str(e)}")
-            logging.error(f"Failed to stop bot: {e}")
+    def _cancel_bot(self, join_timeout=20):
+        """Cancel the running bot task and wait for its cleanup to finish (blocking)"""
+        loop, task, thread = self.bot_loop, self.bot_task, self.bot_thread
+        if loop is not None and task is not None and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass  # loop already closed
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(join_timeout)
+
+    def stop_bot(self, on_stopped=None):
+        """Stop the Telegram bot; on_stopped is called on the Tk thread once it has fully stopped"""
+        if not self.bot_running:
+            messagebox.showwarning("Warning", "Bot is not running!")
+            return
+
+        self.bot_running = False
+        self.status_label.config(text="Stopping...", foreground="orange")
+        for button in (self.start_button, self.stop_button, self.restart_button):
+            button.config(state=tk.DISABLED)
+
+        def work():
+            self._cancel_bot()
+
+            def done():
+                self.status_label.config(text="Stopped", foreground="red")
+                self.start_button.config(state=tk.NORMAL)
+                self.restart_button.config(state=tk.NORMAL)
+                logging.info("Bot stopped")
+                if on_stopped:
+                    on_stopped()
+
+            self.root.after(0, done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def restart_bot(self):
+        """Stop the bot (if running) and start it again with the current configuration"""
+        if self.bot_running:
+            self.stop_bot(on_stopped=self.start_bot)
+        else:
+            self.start_bot()
 
     def run_bot(self):
-        """Run the bot in a separate thread"""
+        """Run the bot in a separate thread on its own cancellable event loop"""
+        loop = asyncio.new_event_loop()
+        self.bot_loop = loop
         try:
-            if bot_main is None:
-                # Import at runtime to avoid circular import
-                from main import main as cli_main
-                asyncio.run(cli_main())
-            else:
-                asyncio.run(bot_main())
-            # Import bot directly and run with GUI root
-            # from config.config import validate_config, API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN
-            # from src.bot import TelegramMediaBot
-            
-            # # Create bot instance
-            # bot = TelegramMediaBot(API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN)
-            
-            # # Run bot with GUI root for authentication
-            # asyncio.run(bot.run(self.root))
-            
+            asyncio.set_event_loop(loop)
+            bot = TelegramMediaBot(
+                bot_config.API_ID, bot_config.API_HASH, bot_config.PHONE_NUMBER, bot_config.BOT_TOKEN
+            )
+            self.bot_task = loop.create_task(bot.run())
+            loop.run_until_complete(self.bot_task)
+        except asyncio.CancelledError:
+            pass  # stopped from the GUI
         except Exception as e:
             logging.error(f"Bot error: {e}")
-            self.root.after(0, self.stop_bot)
+            if self.bot_running:
+                self.root.after(0, self.stop_bot)
+        finally:
+            self.bot_task = None
+            loop.close()
 
     def clear_logs(self):
         """Clear the log text area"""
@@ -667,7 +744,8 @@ class TelegramBotGUI:
         """Quit the application completely"""
         try:
             if self.bot_running:
-                self.stop_bot()
+                self.bot_running = False
+                self._cancel_bot(join_timeout=5)
             
             if self.tray_icon:
                 self.tray_icon.stop()
