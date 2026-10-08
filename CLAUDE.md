@@ -59,6 +59,7 @@ setup_build_env.bat
 
 ### GUI Application Components
 - **src/ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0, migrated to src/ in v1.3.0)
+- **src/chromium_helper.py**: Chromium check/install for screenshots (`check_chromium()`, `install_chromium()` via Playwright's bundled node driver, `ensure_browsers_path()` pins `PLAYWRIGHT_BROWSERS_PATH` to `%LOCALAPPDATA%\ms-playwright` on Windows, v2.5.0)
 - **src/auth_helper.py**: GUI and console authentication helper for Telethon client (v1.0.0)
 
 ### Core Bot Components
@@ -167,7 +168,7 @@ Downloads media and/or screenshots of a whole X account (v2.5.0):
 - `start_flow(username, user_id, processing_msg)`: Scans the account with gallery-dl (in-process `gallery_dl.job.DataJob`, Firefox cookies; ~3,200 post limit; retweets excluded), replies with post/video/photo counts and the mode buttons (`xp_media`, `xp_both`, `xp_shot`)
 - `on_mode_chosen(mode, user_id, message, folder_navigator)`: Stores the mode, shows the folder keyboard (`url_type = 'x_profile'`)
 - `download(user_id, dest_dir, processing_msg)`: Output to `<folder>/x_<username>/` (screenshots in `screenshots/`); media concurrent (5), named `<tweetid>_<n>.<ext>`, deduped by file existence and DB id `xprofile_<tweetid>_<n>`; screenshots via Playwright Chromium (3 concurrent); posts without media are never downloaded/screenshotted
-- Notes: gallery-dl must run in-process (frozen exe's `sys.executable` is the app, so `python -m gallery_dl` fails). Requires being logged in to X in Firefox. Screenshots need one-time `playwright install chromium` (not bundled by PyInstaller; media download works without it)
+- Notes: gallery-dl must run in-process (frozen exe's `sys.executable` is the app, so `python -m gallery_dl` fails). Requires being logged in to X in Firefox. Screenshots need Chromium: use the GUI Install button (or `playwright install chromium` from source); not bundled by PyInstaller, media download works without it
 
 #### `AuthHelper` (src/auth_helper.py)
 GUI and console authentication management (v1.0.0):
@@ -188,7 +189,7 @@ The bot requires these environment variables in `.env`:
 
 Additional requirements for X features (v2.5.0):
 - Log in to X in Firefox on the same machine (cookies are read from Firefox for X downloads and account scans)
-- For X account screenshots, run `playwright install chromium` once (not bundled by PyInstaller)
+- For X account screenshots, install Chromium once via the GUI Configuration tab > Screenshot Engine > Install (or `playwright install chromium` from source); the box shows `Chromium status` with Check/Install buttons. GUI Bot Control also has Restart Bot (Stop cancels the bot task, Start reloads `.env`)
 
 ### File Structure
 
@@ -202,6 +203,7 @@ telegram_auto_download/
 │   ├── database.py             # SQLite database management and operations
 │   ├── folder_navigator.py     # Interactive folder navigation system (260 lines)
 │   ├── auth_helper.py          # GUI/console authentication helper (197 lines, v1.0.0)
+│   ├── chromium_helper.py      # Chromium check/install for screenshots (v2.5.0)
 │   ├── ui.py                   # Main GUI application (tkinter interface, v1.3.0)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)
 ├── web/

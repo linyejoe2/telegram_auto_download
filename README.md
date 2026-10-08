@@ -136,7 +136,7 @@ Then choose a mode with the inline buttons:
 
 After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<username>/` (screenshots in `screenshots/`). Media files are named `<tweetid>_<n>.<ext>` and duplicates are skipped. Posts without media are counted but never downloaded or screenshotted.
 
-> **Note:** You must be logged in to X in Firefox on the same machine. Screenshots require a one-time Chromium install: `playwright install chromium` (not bundled in the installer; media download works without it).
+> **Note:** You must be logged in to X in Firefox on the same machine. Screenshots require a one-time Chromium install: click **Install** in the GUI Configuration tab > Screenshot Engine (or run `playwright install chromium` when running from source). Media download works without it.
 
 ## 📄 License & Disclaimer
 

@@ -1,22 +1,14 @@
 # ChangeLog
 
 ## [2.5.0] - 2026-10-08 - X Account Downloader
-
-- **X Account (Profile) Downloader** — send `https://x.com/<user>` (also `/media`, `/with_replies`, `/tweets` variants):
-  - Scans the account with gallery-dl (run in-process via `gallery_dl.job.DataJob`, Firefox browser cookies); timeline limit is ~3,200 posts and large accounts can take several minutes
-  - Replies with counts: 文章 N 篇 (含媒體 M 篇) / 影片 N 部 / 照片 N 張; retweets are excluded
-  - Mode selection via inline buttons: `xp_media` (media), `xp_both` (media + screenshots), `xp_shot` (screenshots only), followed by the usual folder-navigation keyboard
-  - Output goes to `<folder>/x_<username>/` (screenshots in `screenshots/`); posts without media are counted but never downloaded or screenshotted
-  - Media downloaded concurrently (5), named `<tweetid>_<n>.<ext>`, deduplicated by file existence and the downloads database (id `xprofile_<tweetid>_<n>`)
-  - Screenshots via Playwright Chromium (3 concurrent) with Firefox cookies; requires one-time `playwright install chromium` (not bundled by PyInstaller; media download still works without it)
-- **Code**:
-  - New `web/x_profile_downloader.py` — `XProfileDownloader` (`start_flow`, `on_mode_chosen`, `download`)
-  - `web/url_parser.py` — new `x_profile` URL type and `extract_x_username()`
-  - `src/bot.py` — `handle_callback_query` routes `xp_*` callbacks before the `fn_*` guard
-- **Build / Dependencies**: `requirements.txt` adds `gallery-dl` and `playwright`; `telegram_bot.spec` bundles `gallery_dl` and `playwright`
-- **Fixes**:
-  - `requirements.txt` had a missing line break (`numpy>=2.4.4gallery-dl...`) that stopped gallery-dl installing in the build
-  - Scan originally spawned `python -m gallery_dl`, which breaks in the frozen exe (`sys.executable` is the app); now runs in-process
+### Added
+- X account downloader (`web/x_profile_downloader.py`): send `https://x.com/<user>`, scan via in-process gallery-dl (Firefox cookies), pick `xp_media`/`xp_both`/`xp_shot`, then a folder; saves to `x_<username>/` (`<tweetid>_<n>.<ext>`, deduped by file and DB), screenshots via Playwright Chromium
+- GUI: "Screenshot Engine" box (Chromium Check/Install buttons, `src/chromium_helper.py`, browsers pinned to `%LOCALAPPDATA%\ms-playwright`) and a Restart Bot button
+### Changed
+- GUI Stop now cancels the bot task, Start reloads `.env`, Quit stops the bot; `bot.py` `run()` stops the updater first (no polling Conflict on restart)
+- `package_windows.bat` rewritten: every step checked, failure prints `BUILD FAILED!` and exits 1, clean dirs verified, missing Inno Setup is an error
+### Fixed
+- `requirements.txt` missing line break; gallery-dl no longer run via `python -m` (broken in the frozen exe)
 
 ## [2.4.0] - 2026-10-05 - URL Video Downloader
 
