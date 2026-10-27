@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.6.1
+# Telegram Auto Download Bot v2.7.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -33,13 +33,16 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 - **🔎 Startup Scan**  
   On start, the bot queues anything you sent it recently that was not downloaded yet.
 
+- **📂 Chat File Viewer**  
+  Send `/files` to browse, preview, check the source link of, and delete downloaded files right from Telegram (owner only).
+
 ---
 
 ## 🚀 Quick Start
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.6.1.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.7.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -150,6 +153,15 @@ After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<u
 The bot accepts forwarded posts, albums, X/YouTube links and X account links even while a download is running. Items wait in a serial queue (shown with their queue position); each gets its own folder selector, which appears only after the previous download finishes. Tap `❌ 取消` on a selector (or the X-account mode buttons) to skip an item; an unanswered selector times out after 30 minutes. The queue is kept in memory and is dropped when the bot stops.
 
 On startup the bot checks the last `STARTUP_SCAN_COUNT` messages you sent it (default 30, `0` = off; also set in GUI Configuration > Bot Configuration > "Startup scan (messages)") against the download database and queues every forwarded channel post/album or X/YouTube link not yet downloaded, one item each. X account links are not scanned; forwards from supergroups/anonymous admins are skipped.
+
+## 📂 File Viewer
+
+Send `/files` (owner only; also in the Telegram command menu) to browse the downloads folder with inline buttons: folders first, then files newest-first, 8 per page, with item counts and file sizes. `/files <folder-or-file>` opens that path directly. Hidden files and unfinished `.part` downloads are not shown.
+
+- **Details & source link:** opening a file shows size, modified time, location, video duration/resolution and download time, plus its source and a `🔗 開啟來源` button (Telegram post `https://t.me/c/<channel>/<message>`, the original YouTube/X/Pornhub URL, or `https://x.com/i/status/<id>` for X account downloads; "未知" if the file has no download record).
+- **Preview (`🖼 預覽`):** images are sent as a photo; videos as an album of 3 screenshots (at 15s, the middle and 15s before the end; videos under 45s use 10%/50%/90%).
+- **Delete (`🗑 刪除`):** asks for confirmation first. Only files and empty folders can be deleted. The download record is kept, so the startup scan will not download a deleted file again.
+- **Owner only:** only the account the Telethon session is logged in as can use the viewer, and all paths are confined to the downloads folder.
 
 ## 📄 License & Disclaimer
 

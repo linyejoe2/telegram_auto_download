@@ -73,6 +73,26 @@ class DatabaseManager:
             logger.error(f"檢查文件是否下載過時出錯: {e}")
             return False
 
+    def find_download(self, file_path: str) -> Optional[dict]:
+        """找出磁碟上某個檔案的下載記錄：先比對路徑，檔案被搬移過則改比對 檔名 + 大小"""
+        try:
+            rows = [dict(r) for r in self._connection.execute(
+                "SELECT * FROM downloads WHERE file_name = ?", (os.path.basename(file_path),)
+            ).fetchall()]
+            if not rows:
+                return None
+            target = os.path.normcase(os.path.realpath(file_path))
+            for row in rows:
+                if os.path.normcase(os.path.realpath(row["file_path"])) == target:
+                    return row
+            size = os.path.getsize(file_path) if os.path.exists(file_path) else None
+            for row in rows:
+                if size is not None and row["file_size"] == size:
+                    return row
+        except Exception as e:
+            logger.error(f"查詢檔案下載記錄時出錯: {e}")
+        return None
+
     def is_url_downloaded(self, url: str) -> bool:
         """檢查某個網址（YouTube / X 等）是否已下載過；忽略查詢參數"""
         base = url.split('?')[0]

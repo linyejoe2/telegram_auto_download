@@ -1,5 +1,14 @@
 # ChangeLog
 
+## [2.7.0] - 2026-10-27 - Chat File Viewer
+### Added
+- File viewer (`src/file_viewer.py` `FileViewer`, `bot.py` `handle_files_command`): owner-only `/files [folder-or-file]` (also in Telegram's command menu via `set_my_commands`) browses the downloads folder with inline buttons: folders first, files newest-first, 8 per page, item counts/sizes, hidden and `.part` files hidden, paging/up/close
+- File details (size, modified time, location, video duration/resolution, download time) with source link and `🔗 開啟來源` button: `t.me/c/<channel>/<message>`, original YouTube/X/Pornhub URL, `x.com/i/status/<id>` for X account downloads, "未知" if no record; `DatabaseManager.find_download()` matches by path, falls back to file name + size
+- `🖼 預覽`: images sent as a photo; videos as an album of 3 screenshots (15s, middle, 15s before end; under 45s uses 10%/50%/90%) generated with OpenCV
+- `🗑 刪除` with confirmation: files and empty folders only (root/non-empty folders refused); the DB record is kept so the startup scan does not re-offer the file
+### Security
+- Only the Telethon session account (`TelegramMediaBot.owner_id`) can use `/files` and `fv_*` buttons; all paths are confined to the downloads folder (`..`, absolute paths, outside symlinks rejected)
+
 ## [2.6.1] - 2026-10-27 - Request Queue & Startup Scan
 ### Added
 - Request queue (`src/bot.py` `FlowItem`, `submit_flow`, `_queue_worker`): the bot keeps accepting forwards, albums, X/YouTube links and X account links during a download; items wait serially and show their queue position

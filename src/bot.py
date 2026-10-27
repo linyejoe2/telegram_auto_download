@@ -10,13 +10,14 @@ from functools import partial
 from typing import Awaitable, Callable
 from telethon import TelegramClient
 from telethon.errors import RPCError
-from telegram import Update
-from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, BotCommand, InputMediaPhoto
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
 
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
 from .database import DatabaseManager
+from .file_viewer import FileViewer, build_preview
 from config.config import get_startup_scan_count
 from web import url_parser
 
@@ -94,6 +95,10 @@ class TelegramMediaBot:
         self.queue_task = None
         self.scan_task = None
 
+        # file viewer (/files): browse / preview / delete downloaded files - owner only
+        self.owner_id = None
+        self.file_viewer = FileViewer(lambda: self.folder_navigator.base_path)
+
         # Telethon client with GUI-friendly settings
         self.client = TelegramClient(
             'bot_session',
@@ -133,6 +138,7 @@ class TelegramMediaBot:
 
         # Bot Application (python-telegram-bot)
         self.app = Application.builder().token(bot_token).build()
+        self.app.add_handler(CommandHandler('files', self.handle_files_command))
         self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
 
@@ -365,6 +371,10 @@ class TelegramMediaBot:
         data = query.data or ""
 
         await query.answer()
+
+        if data.startswith("fv_"):
+            await self._handle_file_viewer_callback(user_id, query)
+            return
 
         if data in ("xp_media", "xp_both", "xp_shot"):
             from web.x_profile_downloader import XProfileDownloader
@@ -646,6 +656,60 @@ class TelegramMediaBot:
         await processing_msg.edit_text(result)
         logger.info(f"下載完成 - 成功: {stats['completed_files']}, 失敗: {stats['failed_files']}, 大小: {stats['downloaded_size']/(1024**2):.1f}MB, 速度: {avg_speed:.1f}MB/s")
 
+    # ---------------------- file viewer (/files) ----------------------
+    def _is_owner(self, user_id: int) -> bool:
+        """Only the account the Telethon session is logged in as may browse or delete files."""
+        return self.owner_id is not None and user_id == self.owner_id
+
+    async def handle_files_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._is_owner(update.effective_user.id):
+            await update.message.reply_text("⛔ 只有 Bot 擁有者可以瀏覽檔案")
+            return
+        result = self.file_viewer.start(update.effective_user.id, " ".join(context.args or []))
+        await update.message.reply_text(result.text, reply_markup=result.markup)
+
+    async def _handle_file_viewer_callback(self, user_id: int, query):
+        if not self._is_owner(user_id):
+            await query.message.reply_text("⛔ 只有 Bot 擁有者可以瀏覽檔案")
+            return
+        try:
+            result = self.file_viewer.handle_callback(user_id, query.data)
+            if result.text is not None:
+                await self._safe_edit_markup(query.message, result.text, result.markup)
+            if result.preview_path:
+                asyncio.create_task(self._send_preview(query.message, result.preview_path))
+        except Exception as e:
+            logger.error(f"檔案瀏覽處理失敗: {e}")
+
+    @staticmethod
+    async def _safe_edit_markup(message, text: str, markup):
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                logger.warning(f"更新檔案瀏覽訊息失敗: {e}")
+
+    async def _send_preview(self, message, path: str):
+        """Send an image, or 3 screenshots of a video (~15s in, middle, 15s before the end)."""
+        status = await message.reply_text("🖼 正在產生預覽...")
+        try:
+            frames = await asyncio.get_running_loop().run_in_executor(None, build_preview, path)
+            name = os.path.basename(path)
+            if len(frames) == 1:
+                await message.reply_photo(frames[0][0], caption=f"{name}\n{frames[0][1]}")
+            else:
+                await message.reply_media_group(
+                    [InputMediaPhoto(data, caption=f"{name}\n{label}") for data, label in frames]
+                )
+        except Exception as e:
+            logger.warning(f"預覽失敗 {path}: {e}")
+            await self._safe_edit(status, f"❌ 預覽失敗: {e}")
+            return
+        try:
+            await status.delete()
+        except Exception:
+            pass
+
     # ---------------------- request queue ----------------------
     # Items wait here until it is their turn to ask the user for a folder. The next
     # folder selector pops up only after the previous item's download has finished.
@@ -886,8 +950,13 @@ class TelegramMediaBot:
     async def run(self):
         try:
             await self.start_client()
+            self.owner_id = (await self.client.get_me()).id
             logger.info('正在啟動 Telegram Bot...')
             await self.app.initialize()
+            try:
+                await self.app.bot.set_my_commands([BotCommand('files', '瀏覽 / 預覽 / 刪除已下載的檔案')])
+            except Exception as e:
+                logger.warning(f'設定 Bot 指令選單失敗: {e}')
             await self.app.start()
             logger.info('Bot 已啟動！可以開始轉發訊息了')
             await self.app.updater.start_polling()
