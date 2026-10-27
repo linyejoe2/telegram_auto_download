@@ -73,6 +73,19 @@ class DatabaseManager:
             logger.error(f"檢查文件是否下載過時出錯: {e}")
             return False
 
+    def is_url_downloaded(self, url: str) -> bool:
+        """檢查某個網址（YouTube / X 等）是否已下載過；忽略查詢參數"""
+        base = url.split('?')[0]
+        try:
+            cursor = self._connection.execute(
+                "SELECT 1 FROM downloads WHERE file_id = ? OR file_id LIKE ? LIMIT 1",
+                (base, base + '?%')
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"檢查網址是否下載過時出錯: {e}")
+            return False
+
     def get_downloaded_file_info(self, file_unique_id: str) -> Optional[dict]:
         """獲取已下載文件的詳細信息"""
         try:

@@ -66,6 +66,15 @@ class ProfileScan:
 _pending: Dict[int, ProfileScan] = {}
 
 
+def has_pending_scan(user_id: int) -> bool:
+    return user_id in _pending
+
+
+def pop_pending_scan(user_id: int) -> Optional[ProfileScan]:
+    """Take the scan result for a user (used when queueing the download)."""
+    return _pending.pop(user_id, None)
+
+
 class XProfileDownloader:
 
     # ─── step 1: scan ────────────────────────────────────────────────────────
@@ -133,6 +142,7 @@ class XProfileDownloader:
             [InlineKeyboardButton("⬇️ 下載媒體", callback_data=MODE_MEDIA)],
             [InlineKeyboardButton("⬇️📸 下載媒體 + 截圖", callback_data=MODE_BOTH)],
             [InlineKeyboardButton("📸 只截圖", callback_data=MODE_SHOT)],
+            [InlineKeyboardButton("❌ 取消（不下載）", callback_data="fn_cancel")],
         ])
         await processing_msg.edit_text(
             f"🐦 @{username}\n"
@@ -160,8 +170,8 @@ class XProfileDownloader:
 
     # ─── step 3: download ────────────────────────────────────────────────────
 
-    async def download(self, user_id: int, dest_dir: str, processing_msg) -> None:
-        scan = _pending.pop(user_id, None)
+    async def download(self, user_id: int, dest_dir: str, processing_msg, scan: Optional[ProfileScan] = None) -> None:
+        scan = scan or _pending.pop(user_id, None)
         if not scan:
             await processing_msg.edit_text("❌ 找不到掃描結果，請重新發送帳號網址")
             return

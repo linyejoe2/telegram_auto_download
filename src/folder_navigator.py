@@ -239,4 +239,7 @@ class FolderNavigator:
                 history_row.append(InlineKeyboardButton(label, callback_data=f"fn_prev:{idx}"))
             keyboard.append(history_row)
 
+        # Skip this item (it won't be downloaded) so the next queued item can proceed
+        keyboard.append([InlineKeyboardButton("❌ 取消（不下載）", callback_data="fn_cancel")])
+
         return text, InlineKeyboardMarkup(keyboard)

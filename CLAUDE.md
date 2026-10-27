@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.5.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.6.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -119,10 +119,11 @@ setup_build_env.bat
 5. Uses Telethon client to access the original message, media groups, and all replies
 6. `FolderNavigator` presents inline keyboard UI with subfolder buttons, up/confirm/create actions, and previous-path history (v2.1.0)
 7. User navigates folders by tapping inline buttons; types a name only when creating a new folder (v2.1.0)
-8. Downloads all media files concurrently using `MediaDownloader` to user-selected folder (v0.5.0)
-9. Database records download metadata and file information (v0.4.0)
-10. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
-11. Provides completion summary with performance metrics and storage location
+8. (v2.6.1) Every request goes through the per-item queue (`submit_flow`): the folder selector (step 6) appears only when it is the item's turn, so nothing downloads into a pre-chosen folder
+9. Downloads all media files concurrently using `MediaDownloader` to user-selected folder (v0.5.0)
+10. Database records download metadata and file information (v0.4.0)
+11. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
+12. Provides completion summary with performance metrics and storage location
 
 ### Key Classes and Methods
 
@@ -134,6 +135,8 @@ Main orchestration class that coordinates all bot operations:
 - `_handle_media_group()`: Collects and processes media group messages
 - `_download_and_monitor()`: Shared download and monitoring logic
 - `get_message_and_replies()`: Retrieves original message and replies using Telethon with enhanced error handling
+- `submit_flow()` / `enqueue_flow()` / `_queue_worker()`: Serial request queue of `FlowItem`s (v2.6.1); bot keeps accepting messages during downloads, waiting items show their queue position, each item gets its own folder selector (shown only after the previous download finishes, 30-minute timeout, `❌ 取消` skips); queue is in-memory
+- `_startup_scan()` / `_present_scan_unit()`: On start, checks the user's last `STARTUP_SCAN_COUNT` own messages to the bot (Telethon) against the DB and queues undownloaded channel posts/albums and X/YouTube links (X account links not scanned) (v2.6.1)
 - `run()`: Main bot startup and event loop management
 
 #### `MediaDownloader` (src/downloader.py) 
@@ -186,6 +189,7 @@ The bot requires these environment variables in `.env`:
 - `API_HASH`: Telegram API Hash from my.telegram.org  
 - `PHONE_NUMBER`: Phone number for Telegram client authentication
 - `BOT_TOKEN`: Bot token from @BotFather
+- `STARTUP_SCAN_COUNT` (optional, v2.6.1): number of latest messages sent to the bot that are scanned at startup (default 30, 0 = off); read via `config.get_startup_scan_count()`, editable in GUI Configuration tab; `DatabaseManager.is_url_downloaded()` checks links ignoring query params
 
 Additional requirements for X features (v2.5.0):
 - Log in to X in Firefox on the same machine (cookies are read from Firefox for X downloads and account scans)

@@ -25,10 +25,10 @@ from config.config import validate_config
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v2.5.0"
+        self.version = "v2.6.1"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
-        self.root.geometry("800x600")
+        self.root.geometry("800x680")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Set window icon using the same tray image
@@ -167,7 +167,15 @@ class TelegramBotGUI:
         self.bot_token_var = tk.StringVar()
         ttk.Entry(bot_config_frame, textvariable=self.bot_token_var, width=30, show="*").grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
         
-        ttk.Button(bot_config_frame, text="Save Bot Configuration", command=self.save_bot_config).grid(row=4, column=0, columnspan=2, pady=10, sticky=tk.W)
+        # Startup scan: how many of my latest messages to the bot are checked at startup
+        ttk.Label(bot_config_frame, text="Startup scan (messages):").grid(row=4, column=0, sticky=tk.W, pady=2)
+        scan_frame = ttk.Frame(bot_config_frame)
+        scan_frame.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
+        self.startup_scan_var = tk.StringVar()
+        ttk.Entry(scan_frame, textvariable=self.startup_scan_var, width=6).pack(side=tk.LEFT)
+        ttk.Label(scan_frame, text="0 = off. Checks your last N messages to the bot when it starts").pack(side=tk.LEFT, padx=8)
+
+        ttk.Button(bot_config_frame, text="Save Bot Configuration", command=self.save_bot_config).grid(row=5, column=0, columnspan=2, pady=10, sticky=tk.W)
 
         # Chromium (used for X post screenshots)
         chromium_frame = ttk.LabelFrame(parent, text="Screenshot Engine", padding="10")
@@ -370,6 +378,7 @@ class TelegramBotGUI:
         self.api_hash_var.set(os.getenv('API_HASH', ''))
         self.phone_var.set(os.getenv('PHONE_NUMBER', ''))
         self.bot_token_var.set(os.getenv('BOT_TOKEN', ''))
+        self.startup_scan_var.set(os.getenv('STARTUP_SCAN_COUNT', '30'))
 
     def _set_chromium_status(self, status, busy=False):
         """Update the Chromium status label and buttons (call on the Tk thread)."""
@@ -444,7 +453,13 @@ class TelegramBotGUI:
         """Save bot configuration to .env file"""
         try:
             env_file = '.env'
-            
+
+            scan_count = self.startup_scan_var.get().strip() or '30'
+            if not scan_count.isdigit():
+                messagebox.showerror("Error", "Startup scan must be a whole number (0 = off)")
+                return
+            set_key(env_file, 'STARTUP_SCAN_COUNT', str(int(scan_count)))
+
             # Save all configuration values
             set_key(env_file, 'API_ID', self.api_id_var.get())
             set_key(env_file, 'API_HASH', self.api_hash_var.get())

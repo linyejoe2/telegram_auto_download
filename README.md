@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.5.0
+# Telegram Auto Download Bot v2.6.1
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -27,13 +27,19 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 - **🐦 X Account Download**  
   Send `https://x.com/<user>` — the bot scans the account, reports post/video/photo counts, then downloads all media and/or screenshots of posts.
 
+- **🧾 Request Queue**  
+  Keep sending posts and links while a download runs — items queue up and each asks for its own folder in turn.
+
+- **🔎 Startup Scan**  
+  On start, the bot queues anything you sent it recently that was not downloaded yet.
+
 ---
 
 ## 🚀 Quick Start
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.5.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.6.1.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -53,6 +59,7 @@ API_ID=your_api_id
 API_HASH=your_api_hash
 PHONE_NUMBER=+1234567890
 BOT_TOKEN=your_bot_token
+STARTUP_SCAN_COUNT=30   # optional: messages checked at startup (0 = off)
 
 # 3. Run
 python main.py       # CLI
@@ -137,6 +144,12 @@ Then choose a mode with the inline buttons:
 After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<username>/` (screenshots in `screenshots/`). Media files are named `<tweetid>_<n>.<ext>` and duplicates are skipped. Posts without media are counted but never downloaded or screenshotted.
 
 > **Note:** You must be logged in to X in Firefox on the same machine. Screenshots require a one-time Chromium install: click **Install** in the GUI Configuration tab > Screenshot Engine (or run `playwright install chromium` when running from source). Media download works without it.
+
+## 🧾 Request Queue & Startup Scan
+
+The bot accepts forwarded posts, albums, X/YouTube links and X account links even while a download is running. Items wait in a serial queue (shown with their queue position); each gets its own folder selector, which appears only after the previous download finishes. Tap `❌ 取消` on a selector (or the X-account mode buttons) to skip an item; an unanswered selector times out after 30 minutes. The queue is kept in memory and is dropped when the bot stops.
+
+On startup the bot checks the last `STARTUP_SCAN_COUNT` messages you sent it (default 30, `0` = off; also set in GUI Configuration > Bot Configuration > "Startup scan (messages)") against the download database and queues every forwarded channel post/album or X/YouTube link not yet downloaded, one item each. X account links are not scanned; forwards from supergroups/anonymous admins are skipped.
 
 ## 📄 License & Disclaimer
 

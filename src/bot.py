@@ -4,6 +4,10 @@ import sys
 import logging
 import time
 import queue
+from collections import deque
+from dataclasses import dataclass
+from functools import partial
+from typing import Awaitable, Callable
 from telethon import TelegramClient
 from telethon.errors import RPCError
 from telegram import Update
@@ -12,6 +16,8 @@ from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filt
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
+from .database import DatabaseManager
+from config.config import get_startup_scan_count
 from web import url_parser
 
 # 設定日誌
@@ -58,6 +64,20 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telethon.client.updates').setLevel(logging.WARNING)
 
 
+@dataclass
+class FlowItem:
+    """One request waiting for its turn to ask the user for a folder, then download.
+
+    `present` shows the folder selector (or the first step towards it). `message` is the
+    status message edited while the item waits (None until presented for startup-scan items).
+    """
+    label: str
+    user_id: int
+    message: object
+    present: Callable[[], Awaitable[None]]
+    future: object = None   # resolved by the folder confirmation with a download runner, or None = cancelled
+
+
 class TelegramMediaBot:
     """精簡重構版：合併重複邏輯並抽出共用方法"""
 
@@ -65,6 +85,14 @@ class TelegramMediaBot:
         # media group handling
         self.media_groups = {}
         self.group_timers = {}
+
+        # request queue: one item at a time is asked for its folder and downloaded;
+        # the next item's folder selector pops up only after the previous download finished
+        self._items = deque()
+        self._item_event = asyncio.Event()
+        self._current_item = None
+        self.queue_task = None
+        self.scan_task = None
 
         # Telethon client with GUI-friendly settings
         self.client = TelegramClient(
@@ -348,6 +376,10 @@ class TelegramMediaBot:
         if not data.startswith("fn_"):
             return
 
+        if data == "fn_cancel":
+            await self._cancel_current(user_id, query.message)
+            return
+
         if not self.folder_navigator.is_awaiting_folder_selection(user_id):
             await query.answer("此操作已過期，請重新發送媒體文件", show_alert=True)
             return
@@ -358,23 +390,7 @@ class TelegramMediaBot:
                 await query.message.edit_text(text, reply_markup=markup)
 
             elif data == "fn_ok":
-                state = self.folder_navigator.get_user_state(user_id)
-                pending_url = state.pending_url
-                url_type = state.url_type
-
-                display_path, _ = self.folder_navigator.confirm_selection(user_id)
-                pending = self.folder_navigator.get_pending_messages(user_id)
-
-                await query.message.edit_text(f"📁 已確認存放位置: {display_path}\n🚀 開始下載...")
-
-                if pending:
-                    await self._start_download_with_selected_folder(user_id, query.message, pending)
-                elif pending_url and url_type:
-                    await url_parser.download_confirmed(
-                        user_id, pending_url, url_type, query.message, self.folder_navigator
-                    )
-
-                self.folder_navigator.clear_user_state(user_id)
+                await self._confirm_selection(user_id, query.message)
 
             elif data.startswith("fn_cd:"):
                 index = int(data[6:])
@@ -419,10 +435,6 @@ class TelegramMediaBot:
                 await msg.reply_text(text, reply_markup=markup)
             return
 
-        if self.folder_navigator.is_awaiting_folder_selection(user_id):
-            await msg.reply_text('請使用上方的按鈕選擇資料夾位置')
-            return
-
         # Detect URL (e.g. YouTube link)
         if msg.text:
             detected_url = url_parser.extract_url(msg.text)
@@ -430,8 +442,10 @@ class TelegramMediaBot:
                 url_type = url_parser.detect_type(detected_url)
                 if url_type:
                     processing_msg = await msg.reply_text("🔍 正在解析連結...")
-                    await url_parser.handle_url(
-                        detected_url, url_type, user_id, processing_msg, self.folder_navigator
+                    await self.submit_flow(
+                        user_id, detected_url, processing_msg,
+                        partial(url_parser.handle_url, detected_url, url_type, user_id,
+                                processing_msg, self.folder_navigator),
                     )
                 else:
                     await msg.reply_text("❌ 不支援的連結類型，目前支援 YouTube 及 X (Twitter) 網址")
@@ -507,7 +521,11 @@ class TelegramMediaBot:
                 await processing_msg.edit_text('ℹ️ 該媒體組及相關回覆中沒有找到任何媒體文件')
                 return
 
-            await self._prepare_folder_selection(primary.from_user.id, messages_to_download, processing_msg)
+            user_id = primary.from_user.id
+            await self.submit_flow(
+                user_id, f"媒體組（{len(messages_to_download)} 個媒體）", processing_msg,
+                partial(self._prepare_folder_selection, user_id, messages_to_download, processing_msg),
+            )
 
         except Exception as e:
             logger.error(f'處理媒體組錯誤: {e}')
@@ -548,15 +566,18 @@ class TelegramMediaBot:
                 await processing_msg.edit_text('ℹ️ 該訊息及其回覆中沒有找到任何媒體文件')
                 return
 
-            await self._prepare_folder_selection(message.from_user.id, messages_to_download, processing_msg)
+            user_id = message.from_user.id
+            await self.submit_flow(
+                user_id, f"{len(messages_to_download)} 個媒體", processing_msg,
+                partial(self._prepare_folder_selection, user_id, messages_to_download, processing_msg),
+            )
 
         except Exception as e:
             logger.error(f'處理訊息時出錯: {e}')
             await processing_msg.edit_text(f'❌ 處理時出錯: {e}')
 
     # ---------------------- download flow ----------------------
-    async def _start_download_with_selected_folder(self, user_id: int, processing_msg, messages_to_download: list):
-        selected_folder = self.folder_navigator.get_selected_path(user_id)
+    async def _start_download_with_selected_folder(self, selected_folder: str, processing_msg, messages_to_download: list):
         try:
             os.makedirs(selected_folder, exist_ok=True)
             original_message_id = messages_to_download[0].id if messages_to_download else 0
@@ -625,6 +646,227 @@ class TelegramMediaBot:
         await processing_msg.edit_text(result)
         logger.info(f"下載完成 - 成功: {stats['completed_files']}, 失敗: {stats['failed_files']}, 大小: {stats['downloaded_size']/(1024**2):.1f}MB, 速度: {avg_speed:.1f}MB/s")
 
+    # ---------------------- request queue ----------------------
+    # Items wait here until it is their turn to ask the user for a folder. The next
+    # folder selector pops up only after the previous item's download has finished.
+    SELECT_TIMEOUT = 30 * 60  # give up on an unanswered folder prompt so it can't block the queue forever
+
+    async def submit_flow(self, user_id: int, label: str, message, present):
+        await self.enqueue_flow(FlowItem(label, user_id, message, present))
+
+    def _queue_text(self, item: FlowItem, position: int) -> str:
+        ahead = position - 1 + (1 if self._current_item else 0)
+        return (
+            f"⏳ 排隊中（第 {position} 位，前方還有 {ahead} 個項目）\n"
+            f"{item.label}\n前一個項目完成後，這裡會出現資料夾選擇"
+        )
+
+    async def enqueue_flow(self, item: FlowItem):
+        busy = self._current_item is not None or bool(self._items)
+        self._items.append(item)
+        self._item_event.set()
+        if busy:
+            await self._safe_edit(item.message, self._queue_text(item, len(self._items)))
+            logger.info(f"已加入佇列（等待中 {len(self._items)} 個）: {item.label}")
+
+    def _flow_waiting(self, user_id: int) -> bool:
+        """True while the user still has to answer a prompt (folder selector, or X-account mode choice)."""
+        from web.x_profile_downloader import has_pending_scan
+        return self.folder_navigator.is_awaiting_folder_selection(user_id) or has_pending_scan(user_id)
+
+    def _abandon_flow(self, user_id: int):
+        from web.x_profile_downloader import pop_pending_scan
+        self.folder_navigator.clear_user_state(user_id)
+        pop_pending_scan(user_id)
+
+    async def _queue_worker(self):
+        """Serve one item at a time: show its folder selector, wait for the answer, download."""
+        while True:
+            while not self._items:
+                self._item_event.clear()
+                await self._item_event.wait()
+
+            item = self._items.popleft()
+            self._current_item = item
+            for position, waiting in enumerate(list(self._items)[:10], start=1):
+                await self._safe_edit(waiting.message, self._queue_text(waiting, position))
+
+            try:
+                logger.info(f"輪到佇列項目: {item.label}")
+                item.future = asyncio.get_running_loop().create_future()
+                await item.present()
+                if not self._flow_waiting(item.user_id):
+                    continue  # nothing to answer (the user already saw why, e.g. an error)
+                runner = await asyncio.wait_for(item.future, self.SELECT_TIMEOUT)
+                if runner is not None:
+                    await runner()
+            except asyncio.TimeoutError:
+                self._abandon_flow(item.user_id)
+                await self._safe_edit(item.message, "⌛ 等待選擇資料夾逾時，已取消這個項目")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"佇列項目失敗 ({item.label}): {e}")
+                self._abandon_flow(item.user_id)
+                await self._safe_edit(item.message, f"❌ 任務失敗: {e}")
+            finally:
+                self._current_item = None
+                item.future = None
+
+    async def _confirm_selection(self, user_id: int, message):
+        """Folder confirmed for the current item: hand the worker what it needs to download."""
+        item = self._current_item
+        if item is None or item.user_id != user_id or item.future is None or item.future.done():
+            await message.edit_text("此操作已過期，請重新發送媒體文件")
+            return
+
+        nav = self.folder_navigator
+        state = nav.get_user_state(user_id)
+        pending_url, url_type = state.pending_url, state.url_type
+
+        display_path, _ = nav.confirm_selection(user_id)
+        pending = list(nav.get_pending_messages(user_id))
+        selected_folder = nav.get_selected_path(user_id)
+        scan = None
+        if pending_url and url_type == 'x_profile':
+            from web.x_profile_downloader import pop_pending_scan
+            scan = pop_pending_scan(user_id)
+        nav.clear_user_state(user_id)
+
+        if pending:
+            async def runner():
+                await self._start_download_with_selected_folder(selected_folder, message, pending)
+        elif pending_url and url_type:
+            async def runner():
+                await url_parser.download_confirmed(
+                    user_id, pending_url, url_type, message, nav, selected_path=selected_folder, scan=scan)
+        else:
+            await message.edit_text("ℹ️ 沒有需要下載的項目")
+            item.future.set_result(None)
+            return
+
+        await message.edit_text(f"📁 已確認存放位置: {display_path}\n🚀 開始下載...")
+        item.future.set_result(runner)
+
+    async def _cancel_current(self, user_id: int, message):
+        """User skipped the current item: drop it so the next queued item can proceed."""
+        item = self._current_item
+        self._abandon_flow(user_id)
+        if item and item.user_id == user_id and item.future and not item.future.done():
+            item.future.set_result(None)
+        await self._safe_edit(message, "❎ 已取消，不會下載這個項目")
+
+    @staticmethod
+    async def _safe_edit(message, text: str):
+        if message is None:
+            return
+        try:
+            await message.edit_text(text)
+        except Exception:
+            pass  # unchanged text, deleted message, rate limit...
+
+    # ---------------------- startup scan ----------------------
+    def _is_media_downloaded(self, message) -> bool:
+        """True if recorded in the DB, or if it has no downloadable photo/document at all."""
+        unique_id = self.downloader._get_file_unique_id(message)
+        return unique_id is None or DatabaseManager().is_file_downloaded(str(unique_id))
+
+    async def _find_undownloaded(self, sent_messages):
+        """Check the user's own messages to the bot, oldest first.
+
+        Returns one unit per forwarded post/album or link that is not fully downloaded:
+        ('media', label, [messages]) or ('url', url, url_type).
+        """
+        from telethon import utils
+        from telethon.tl.types import PeerChannel
+
+        db = DatabaseManager()
+        units, claimed, seen_urls, seen_groups = [], set(), set(), set()
+
+        for m in sent_messages:
+            try:
+                text_url = url_parser.extract_url(getattr(m, 'message', '') or '')
+                url_type = url_parser.detect_type(text_url) if text_url else None
+                if url_type in ('youtube', 'x'):
+                    if text_url not in seen_urls and not db.is_url_downloaded(text_url):
+                        seen_urls.add(text_url)
+                        units.append(('url', text_url, url_type))
+                    continue
+
+                fwd = m.fwd_from
+                if not (fwd and isinstance(fwd.from_id, PeerChannel) and fwd.channel_post):
+                    continue
+                if m.grouped_id:  # an album is handled once, via its first message (like the live flow)
+                    if m.grouped_id in seen_groups:
+                        continue
+                    seen_groups.add(m.grouped_id)
+
+                chat_id = utils.get_peer_id(fwd.from_id)
+                original, replies = await self.get_message_and_replies(chat_id, fwd.channel_post)
+                if not original:
+                    continue
+                candidates = (await self._collect_media_from_original(chat_id, original)
+                              if m.grouped_id else ([original] if original.media else []))
+                candidates += [r for r in replies if getattr(r, 'media', None)]
+                missing = [c for c in candidates
+                           if (c.chat_id, c.id) not in claimed and not self._is_media_downloaded(c)]
+                if missing:
+                    claimed.update((c.chat_id, c.id) for c in missing)
+                    units.append(('media', f"轉發訊息（{len(missing)} 個媒體）", missing))
+            except Exception as e:
+                logger.warning(f"啟動掃描：略過一則無法檢查的訊息 {getattr(m, 'id', '?')}: {e}")
+
+        return units
+
+    async def _present_scan_unit(self, item: FlowItem, unit):
+        """Show this startup-scan item to the user: a fresh message with its own folder selector."""
+        item.message = await self.app.bot.send_message(chat_id=item.user_id, text=f"🔎 未下載項目：{item.label}")
+        if unit[0] == 'media':
+            await self._prepare_folder_selection(item.user_id, unit[2], item.message)
+        else:
+            await url_parser.handle_url(unit[1], unit[2], item.user_id, item.message, self.folder_navigator)
+
+    async def _startup_scan(self):
+        """Look at the user's last N messages to the bot; queue every item that isn't downloaded yet."""
+        limit = get_startup_scan_count()
+        if limit <= 0:
+            logger.info('啟動掃描已停用 (STARTUP_SCAN_COUNT=0)')
+            return
+        try:
+            await asyncio.sleep(2)  # let polling come up first
+            bot_user = await self.app.bot.get_me()
+            entity = await self.client.get_entity(bot_user.username)
+            me = await self.client.get_me()
+
+            sent = []
+            async for m in self.client.iter_messages(entity, limit=limit * 10):
+                if m.out:  # skip the bot's own progress messages
+                    sent.append(m)
+                    if len(sent) >= limit:
+                        break
+            sent.reverse()
+            logger.info(f'啟動掃描：檢查最近 {len(sent)} 則已發送給 Bot 的訊息...')
+
+            units = await self._find_undownloaded(sent)
+            if not units:
+                logger.info('啟動掃描：最近的訊息都已下載')
+                return
+
+            await self.app.bot.send_message(
+                chat_id=me.id,
+                text=(f"🔎 啟動掃描（最近 {len(sent)} 則訊息）發現 {len(units)} 個項目尚未下載。\n"
+                      f"會逐一詢問存放位置，每個項目下載完成後才出現下一個；不想下載的可按「❌ 取消」略過。"),
+            )
+            for unit in units:
+                item = FlowItem(unit[1], me.id, None, None)
+                item.present = partial(self._present_scan_unit, item, unit)
+                await self.enqueue_flow(item)
+            logger.info(f'啟動掃描：{len(units)} 個尚未下載的項目已加入佇列')
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f'啟動掃描失敗: {e}')
+
     # ---------------------- utilities ----------------------
     def get_download_statistics(self):
         return self.downloader.get_download_statistics()
@@ -650,12 +892,20 @@ class TelegramMediaBot:
             logger.info('Bot 已啟動！可以開始轉發訊息了')
             await self.app.updater.start_polling()
 
+            self.queue_task = asyncio.create_task(self._queue_worker())
+            self.scan_task = asyncio.create_task(self._startup_scan())
+
             while True:
                 await asyncio.sleep(1)
 
         except Exception as e:
             logger.error(f'Bot 運行出錯: {e}')
         finally:
+            background = [t for t in (self.scan_task, self.queue_task) if t]
+            for task in background:
+                task.cancel()
+            await asyncio.gather(*background, return_exceptions=True)
+
             # Stop polling first so a restarted bot doesn't hit a polling Conflict
             if self.app.updater and self.app.updater.running:
                 await self.app.updater.stop()

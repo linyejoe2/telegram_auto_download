@@ -35,6 +35,13 @@ def validate_config():
     
     return True
 
+def get_startup_scan_count(default: int = 30) -> int:
+    """How many of the user's latest messages to the bot are checked at startup (0 = off)."""
+    try:
+        return max(0, int(os.getenv('STARTUP_SCAN_COUNT', default)))
+    except (TypeError, ValueError):
+        return default
+
 # File and Directory Configuration
 def get_app_dir():
     """Get the application directory that works for both development and packaged app"""

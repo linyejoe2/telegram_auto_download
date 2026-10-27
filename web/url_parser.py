@@ -108,12 +108,15 @@ async def download_confirmed(
     url_type: str,
     processing_msg,
     folder_navigator,
+    selected_path: Optional[str] = None,
+    scan=None,
 ) -> None:
     """
-    Called after the user confirms the destination folder.
+    Called after the user confirms the destination folder (possibly later, from the
+    download queue — so selected_path / scan can be captured up front and passed in).
     Delegates to the appropriate site-specific downloader.
     """
-    selected_path = folder_navigator.get_selected_path(user_id)
+    selected_path = selected_path or folder_navigator.get_selected_path(user_id)
 
     if url_type == 'youtube':
         from .youtube_downloader import YouTubeDownloader
@@ -123,7 +126,7 @@ async def download_confirmed(
         await XDownloader().download(url, selected_path, processing_msg)
     elif url_type == 'x_profile':
         from .x_profile_downloader import XProfileDownloader
-        await XProfileDownloader().download(user_id, selected_path, processing_msg)
+        await XProfileDownloader().download(user_id, selected_path, processing_msg, scan=scan)
     elif url_type == 'pornhub':
         from .p_downloader import PDownloader
         await PDownloader().download(url, selected_path, processing_msg)

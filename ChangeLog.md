@@ -1,5 +1,13 @@
 # ChangeLog
 
+## [2.6.1] - 2026-10-27 - Request Queue & Startup Scan
+### Added
+- Request queue (`src/bot.py` `FlowItem`, `submit_flow`, `_queue_worker`): the bot keeps accepting forwards, albums, X/YouTube links and X account links during a download; items wait serially and show their queue position
+- Each queued item gets its own folder selector, shown only after the previous download finishes; new `❌ 取消` button on folder selectors and X-account mode buttons; unanswered selector times out after 30 minutes
+- Startup scan: on start, the last N messages you sent the bot are checked against the downloads DB and undownloaded channel posts/albums and X/YouTube links are queued (`STARTUP_SCAN_COUNT` in `.env`, default 30, 0 = off; GUI "Startup scan (messages)"; `DatabaseManager.is_url_downloaded()`)
+### Changed
+- Removed the "請使用上方的按鈕選擇資料夾位置" rejection; `url_parser.download_confirmed()` takes `selected_path`/`scan`; GUI window 800x680
+
 ## [2.5.0] - 2026-10-08 - X Account Downloader
 ### Added
 - X account downloader (`web/x_profile_downloader.py`): send `https://x.com/<user>`, scan via in-process gallery-dl (Firefox cookies), pick `xp_media`/`xp_both`/`xp_shot`, then a folder; saves to `x_<username>/` (`<tweetid>_<n>.<ext>`, deduped by file and DB), screenshots via Playwright Chromium
