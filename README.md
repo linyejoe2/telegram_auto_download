@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.7.4
+# Telegram Auto Download Bot v2.7.5
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -42,7 +42,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.7.4.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.7.5.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -163,6 +163,7 @@ Send `/files` (owner only; also in the Telegram command menu) to browse the down
 
 - **Details & source link:** `/files <file path>` shows size, modified time, location, video duration/resolution and download time, plus its source and a `🔗 開啟來源` button (Telegram post `https://t.me/c/<channel>/<message>`, the original YouTube/X/Pornhub URL, or `https://x.com/i/status/<id>` for X account downloads; "未知" if the file has no download record).
 - **Single-file preview (`🖼 預覽`):** images are sent as a photo; videos as an album of 3 screenshots (at 15s, the middle and 15s before the end; videos under 45s use 10%/50%/90%).
+- **Load video (`📤 載入影片`):** uploads the video to the chat with Telethon (up to 2 GB, no Bot API 50 MB limit). Videos over 500 MB or above 4000 kbps are compressed first with ffmpeg (H.265, 720p, 2000 kbps; ffmpeg must be in PATH or set `FFMPEG_PATH`). The compressed copy is saved as a hidden `.<name>.720p_h265.mp4` in the same folder (not shown in the viewer) and re-used next time.
 - **Delete (`🗑 刪除`):** asks for confirmation first. Only files and empty folders can be deleted. The download record is kept, so the startup scan will not download a deleted file again.
 - **Owner only:** only the account the Telethon session is logged in as can use the viewer, and all paths are confined to the downloads folder.
 

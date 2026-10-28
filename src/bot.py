@@ -10,6 +10,7 @@ from functools import partial
 from typing import Awaitable, Callable
 from telethon import TelegramClient
 from telethon.errors import RPCError
+from telethon.tl.types import DocumentAttributeVideo
 from telegram import Update, BotCommand, InputMediaPhoto
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
 
@@ -17,7 +18,9 @@ from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
 from .database import DatabaseManager
-from .file_viewer import FileViewer, build_preview, build_batch_preview
+from .file_viewer import FileViewer, build_preview, build_batch_preview, build_frame_preview, probe_video, fmt_size
+from .video_loader import (find_ffmpeg, needs_compression, existing_compressed, compress_video,
+                           MAX_UPLOAD_BYTES, TARGET_HEIGHT, TARGET_BITRATE_KBPS)
 from config.config import get_startup_scan_count
 from web import url_parser
 
@@ -83,6 +86,7 @@ class TelegramMediaBot:
     """精簡重構版：合併重複邏輯並抽出共用方法"""
 
     def __init__(self, api_id, api_hash, phone_number, bot_token):
+        self.api_id, self.api_hash = api_id, api_hash
         # media group handling
         self.media_groups = {}
         self.group_timers = {}
@@ -98,6 +102,8 @@ class TelegramMediaBot:
         # file viewer (/files): browse / preview / delete downloaded files - owner only
         self.owner_id = None
         self.file_viewer = FileViewer(lambda: self.folder_navigator.base_path)
+        self.upload_client = None        # Telethon client logged in as the bot: uploads up to 2 GB (Bot API: 50 MB)
+        self._loading = set()            # videos currently being compressed / uploaded
 
         # Telethon client with GUI-friendly settings
         self.client = TelegramClient(
@@ -680,6 +686,8 @@ class TelegramMediaBot:
                 asyncio.create_task(self._send_preview(query.message, result.preview_path))
             if result.batch:
                 asyncio.create_task(self._send_preview_batch(query.message, result.batch))
+            if result.load_path:
+                asyncio.create_task(self._load_video(query.message, result.load_path))
         except Exception as e:
             logger.error(f"檔案瀏覽處理失敗: {e}")
 
@@ -690,6 +698,106 @@ class TelegramMediaBot:
         except Exception as e:
             if "not modified" not in str(e).lower():
                 logger.warning(f"更新檔案瀏覽訊息失敗: {e}")
+
+    async def _start_upload_client(self):
+        """Second Telethon connection as the bot itself, so videos arrive as bot messages without the Bot API size limit."""
+        try:
+            client = TelegramClient('bot_upload_session', self.api_id, self.api_hash,
+                                    connection_retries=3, retry_delay=1, auto_reconnect=True, timeout=30)
+            await client.start(bot_token=self.bot_token)
+            self.upload_client = client
+            logger.info('影片上傳連線（Telethon Bot）已就緒')
+        except Exception as e:
+            logger.warning(f'影片上傳連線啟動失敗，「載入影片」將無法使用: {e}')
+
+    async def _load_video(self, message, path: str):
+        """Send a downloaded video to the chat through Telethon; big / high bitrate videos are compressed first."""
+        key = os.path.normcase(path)
+        if key in self._loading:
+            await message.reply_text("⏳ 這個影片正在處理中")
+            return
+        self._loading.add(key)
+        status = await message.reply_text("📤 準備載入影片...")
+        try:
+            await self._do_load_video(message, status, path)
+        except Exception as e:
+            logger.error(f"載入影片失敗 {path}: {e}")
+            await self._safe_edit(status, f"❌ 載入影片失敗: {e}")
+        finally:
+            self._loading.discard(key)
+
+    async def _do_load_video(self, message, status, path: str):
+        client = self.upload_client
+        if client is None or not client.is_connected():
+            raise RuntimeError("上傳連線尚未就緒（請重新啟動 Bot）")
+        loop = asyncio.get_running_loop()
+        name = os.path.basename(path)
+
+        info = await loop.run_in_executor(None, probe_video, path)
+        duration = info[0] if info else 0
+        upload_path, note = path, ""
+        if await loop.run_in_executor(None, needs_compression, path, duration):
+            ready = existing_compressed(path)
+            if ready:
+                upload_path, note = ready, f"🗜 {TARGET_HEIGHT}p H.265（使用已壓縮的預覽檔）"
+            elif find_ffmpeg() is None:
+                if os.path.getsize(path) > MAX_UPLOAD_BYTES:
+                    raise RuntimeError("影片超過 2GB 且找不到 ffmpeg（請安裝並加入 PATH，或設定 FFMPEG_PATH）")
+                note = "⚠️ 找不到 ffmpeg，已傳送原檔"
+            else:
+                box = {'p': 0.0}
+                job = loop.run_in_executor(None, compress_video, path, duration, lambda f: box.__setitem__('p', f))
+                while not job.done():
+                    await asyncio.wait({job}, timeout=4)
+                    await self._safe_edit(
+                        status, f"🗜 壓縮中 {box['p'] * 100:.0f}%（H.265 {TARGET_HEIGHT}p {TARGET_BITRATE_KBPS}kbps）\n{name}")
+                upload_path, note = await job, f"🗜 {TARGET_HEIGHT}p H.265（已壓縮，預覽檔以隱藏檔保存在原資料夾）"
+
+        size = os.path.getsize(upload_path)
+        if size > MAX_UPLOAD_BYTES:
+            raise RuntimeError(f"檔案 {fmt_size(size)} 超過 Telegram 2GB 上傳上限")
+
+        up_info = await loop.run_in_executor(None, probe_video, upload_path)
+        attributes = [DocumentAttributeVideo(duration=int(up_info[0]), w=up_info[1], h=up_info[2],
+                                             supports_streaming=True)] if up_info else None
+        thumb = None
+        try:
+            import io
+            thumb = io.BytesIO((await loop.run_in_executor(None, build_frame_preview, upload_path))[0])
+            thumb.name = 'thumb.jpg'
+        except Exception:
+            pass
+
+        peer = await self._resolve_upload_peer(client, message.chat)
+        last = [0.0]
+
+        async def on_progress(sent, total):
+            now = time.time()
+            if sent < total and now - last[0] < 4:
+                return
+            last[0] = now
+            await self._safe_edit(status, f"📤 上傳中 {sent * 100 / total:.0f}%（{fmt_size(sent)} / {fmt_size(total)}）\n{name}")
+
+        caption = name + (f"\n{note}" if note else "")
+        await client.send_file(peer, upload_path, caption=caption, supports_streaming=True,
+                               attributes=attributes, thumb=thumb, progress_callback=on_progress)
+        try:
+            await status.delete()
+        except Exception:
+            pass
+
+    @staticmethod
+    async def _resolve_upload_peer(client, chat):
+        """The bot's own Telethon session only knows users it received updates from (the button press just was one)."""
+        for attempt in range(2):
+            try:
+                return await client.get_input_entity(chat.id)
+            except ValueError:
+                if attempt == 0:
+                    await asyncio.sleep(1.5)
+        if getattr(chat, 'username', None):
+            return await client.get_input_entity(chat.username)
+        raise RuntimeError("上傳連線還不認識這個聊天室，請再傳一次 /files 後重試")
 
     async def _send_preview_batch(self, message, batch):
         """Folder preview: one screenshot per video as an album, then a fresh "next page" message
@@ -988,6 +1096,7 @@ class TelegramMediaBot:
             await self.app.start()
             logger.info('Bot 已啟動！可以開始轉發訊息了')
             await self.app.updater.start_polling()
+            await self._start_upload_client()
 
             self.queue_task = asyncio.create_task(self._queue_worker())
             self.scan_task = asyncio.create_task(self._startup_scan())
@@ -1009,4 +1118,7 @@ class TelegramMediaBot:
             if self.app.running:
                 await self.app.stop()
             await self.app.shutdown()
+            if self.upload_client:
+                await self.upload_client.disconnect()
+                self.upload_client = None
             await self.client.disconnect()

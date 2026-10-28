@@ -1,5 +1,10 @@
 # ChangeLog
 
+## [2.7.5] - 2026-10-28 - Load Video
+### Added
+- File detail `📤 載入影片` (`fv_load`): sends the video to the chat through Telethon (second session logged in as the bot, `src/bot.py` `_load_video`) instead of the Bot API, so the 50 MB limit does not apply (up to 2 GB)
+- Videos over 500 MB or above 4000 kbps are first compressed with ffmpeg to H.265 / 720p / 2000 kbps (`src/video_loader.py`, needs ffmpeg in PATH or `FFMPEG_PATH`); the result is kept as hidden `.<name>.720p_h265.mp4` next to the original (not listed by the viewer) and re-used next time
+
 ## [2.7.4] - 2026-10-28 - File Detail Button Restored
 ### Fixed
 - `/files` list shows the newest 30 files of a level again as `fv_f` buttons (below the folders, no paging) so file details, source link, preview and delete are reachable by tapping

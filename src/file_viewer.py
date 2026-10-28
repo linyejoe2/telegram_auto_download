@@ -9,7 +9,7 @@ batches: this folder, or recursively all sub folders), file details (reachable w
 the bot owns the Telegram I/O and the owner check.
 
 Callback data (all prefixed `fv_`, index based so they stay under Telegram's 64-byte limit):
-  fv_cd:i  fv_f:i  fv_up  fv_pv  fv_pva  fv_ph  fv_pha  fv_pn  fv_back  fv_prev  fv_del  fv_deld  fv_yes  fv_no  fv_close
+  fv_cd:i  fv_f:i  fv_load  fv_up  fv_pv  fv_pva  fv_ph  fv_pha  fv_pn  fv_back  fv_prev  fv_del  fv_deld  fv_yes  fv_no  fv_close
 """
 
 import io
@@ -307,6 +307,7 @@ class ViewResult:
     markup: Optional[InlineKeyboardMarkup] = None
     preview_path: Optional[str] = None       # caller should send a preview of this file
     batch: Optional[PreviewBatch] = None     # caller should send these folder-preview screenshots
+    load_path: Optional[str] = None          # caller should upload this video to the chat (Telethon)
 
 
 class FileViewer:
@@ -420,6 +421,10 @@ class FileViewer:
             state.selected = None
         elif action == 'fv_back':
             state.selected = state.pending_delete = None
+        elif action == 'fv_load':
+            path = self._selected_path(state)
+            if path and os.path.splitext(path)[1].lower() in VIDEO_EXTS:
+                return ViewResult(None, load_path=path)
         elif action == 'fv_prev':
             path = self._selected_path(state)
             if path and is_previewable(state.selected):
@@ -587,6 +592,8 @@ class FileViewer:
         keyboard = []
         if link:
             keyboard.append([InlineKeyboardButton("🔗 開啟來源", url=link)])
+        if os.path.splitext(name)[1].lower() in VIDEO_EXTS:
+            keyboard.append([InlineKeyboardButton("📤 載入影片", callback_data="fv_load")])
         if is_previewable(name):
             keyboard.append([InlineKeyboardButton("🖼 預覽", callback_data="fv_prev")])
         keyboard.append([InlineKeyboardButton("🗑 刪除", callback_data="fv_del"),

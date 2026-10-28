@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.7.4) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.7.5) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -168,6 +168,7 @@ Inline-keyboard browser of the downloads folder for `/files` (v2.7.0):
 - Folder photo loading (v2.7.3): `fv_ph` (`🖼 載入照片 (n)`, this level) and `fv_pha` (`🖼 載入所有照片 (n)`, recursive) reuse the `fv_pn` lazy paging; `list_photos()`/`list_media()` collect files, `build_batch_preview()` returns a thumbnail per photo (`build_image_preview()`), `ViewState.preview_kind` is `video` or `photo`
 - Detail view shows size, mtime, location, video duration/resolution, download time and the source link (`source_link()`: `t.me/c/<channel>/<message>`, original YouTube/X/Pornhub URL, `x.com/i/status/<id>` for X profile downloads, "未知" if unknown); record from `DatabaseManager.find_download(file_path)` (match by path, fallback file name + size)
 - `build_preview(path)` (single-file `🖼 預覽`, unchanged in v2.7.1): image -> 1 photo; video -> 3 OpenCV frames (15s, middle, 15s before end; <45s uses 10%/50%/90%), run in an executor
+- Load video (v2.7.5): detail view `fv_load` -> `ViewResult.load_path` -> `TelegramMediaBot._load_video()` uploads via `upload_client` (second Telethon session `bot_upload_session` logged in with the bot token, started in `run()`; resolves the chat from updates it received) with `DocumentAttributeVideo` + thumbnail; `src/video_loader.py`: `needs_compression()` (>500 MB or >4000 kbps), `compress_video()` (ffmpeg libx265, 720p, 2000 kbps, aac 128k, progress shown in the status message), result stored as hidden `.<name>.720p_h265.mp4` (`compressed_path()`, re-used via `existing_compressed()`); needs ffmpeg in PATH or `FFMPEG_PATH` (not bundled)
 - Delete with confirmation: files and empty folders only; the DB record is kept so the startup scan does not re-offer the file
 
 #### `XProfileDownloader` (web/x_profile_downloader.py)
