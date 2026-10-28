@@ -1,18 +1,19 @@
 """
 src/file_viewer.py — Browse the downloads folder from the Telegram chat.
 
-Inline-keyboard file browser (folders, files, pagination), file details, image / video
-previews (a video shows 3 screenshots: ~15s in, the middle, 15s before the end) and
-deletion of files / empty folders after a confirmation. Pure logic: the bot owns the
-Telegram I/O and the owner check.
+Inline-keyboard folder browser (all sub folders of a level on one keyboard, like the folder
+selector), folder video previews (1 screenshot per video at 15s, sent in lazily generated
+batches: this folder, or recursively all sub folders), file details (reachable with
+`/files <file>`), single file previews (a video shows 3 screenshots: ~15s in, the middle,
+15s before the end) and deletion of files / empty folders after a confirmation. Pure logic:
+the bot owns the Telegram I/O and the owner check.
 
 Callback data (all prefixed `fv_`, index based so they stay under Telegram's 64-byte limit):
-  fv_cd:i  fv_f:i  fv_pg:n  fv_up  fv_back  fv_prev  fv_del  fv_deld  fv_yes  fv_no  fv_close
+  fv_cd:i  fv_up  fv_pv  fv_pva  fv_pn  fv_back  fv_prev  fv_del  fv_deld  fv_yes  fv_no  fv_close
 """
 
 import io
 import logging
-import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -22,9 +23,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 logger = logging.getLogger(__name__)
 
-PAGE_SIZE = 8
-NAME_LIMIT = 26
+NAME_LIMIT = 18
 PREVIEW_EDGE_SECONDS = 15
+FOLDERS_PER_ROW = 2
+PREVIEW_BATCH = 10              # one Telegram album
+PREVIEW_FRAME_SECONDS = 15      # the single screenshot of a folder preview
 PREVIEW_MAX_WIDTH = 1280
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.wmv', '.flv', '.m4v', '.ts'}
@@ -194,6 +197,66 @@ def build_preview(path: str) -> List[Tuple[bytes, str]]:
     raise ValueError('此檔案類型不支援預覽')
 
 
+def build_frame_preview(path: str) -> Tuple[bytes, str]:
+    """One screenshot at 15s (the middle for videos shorter than 16s). Raises ValueError."""
+    import cv2
+    cap = cv2.VideoCapture(path)
+    try:
+        if not cap.isOpened():
+            raise ValueError('無法開啟影片')
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        if fps <= 0 or total <= 0:
+            raise ValueError('無法讀取影片長度')
+        duration = total / fps
+        t = PREVIEW_FRAME_SECONDS if duration > PREVIEW_FRAME_SECONDS + 1 else duration / 2
+        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, min(int(t * fps), int(total) - 1)))
+        ok, frame = cap.read()
+        if not ok:
+            raise ValueError('無法擷取影片畫面')
+        return _encode_jpeg_cv(frame), f"▶️ {fmt_duration(t)} / {fmt_duration(duration)}"
+    finally:
+        cap.release()
+
+
+def list_videos(directory: str, recursive: bool) -> List[str]:
+    """Video files of a folder (optionally with all sub folders), grouped by folder, sorted by name."""
+    def is_video(name: str) -> bool:
+        return not name.startswith('.') and os.path.splitext(name)[1].lower() in VIDEO_EXTS
+
+    found: List[str] = []
+    try:
+        if recursive:
+            for root, dirs, files in os.walk(directory):
+                dirs[:] = sorted((d for d in dirs if not d.startswith('.')), key=str.lower)
+                found.extend(os.path.join(root, f) for f in sorted(files, key=str.lower) if is_video(f))
+        else:
+            with os.scandir(directory) as it:
+                names = [i.name for i in it if i.is_file() and is_video(i.name)]
+            found = [os.path.join(directory, n) for n in sorted(names, key=str.lower)]
+    except OSError as e:
+        logger.warning(f"無法讀取資料夾 {directory}: {e}")
+    return found
+
+
+def build_batch_preview(paths: List[str], names: List[str]) -> Tuple[List[Tuple[bytes, str]], int]:
+    """[(jpeg, caption)] for each readable video, plus the number that failed. Blocking."""
+    frames, failed = [], 0
+    for path, name in zip(paths, names):
+        try:
+            data, label = build_frame_preview(path)
+        except Exception as e:
+            logger.warning(f"預覽失敗 {path}: {e}")
+            failed += 1
+            continue
+        caption = f"{name}\n{label}"
+        link = source_link(FileViewer._find_record(path))
+        if link:
+            caption += f"\n🔗 {link}"
+        frames.append((data, caption))
+    return frames, failed
+
+
 # ─── browser state & rendering ───────────────────────────────────────────────
 
 @dataclass
@@ -207,10 +270,21 @@ class Entry:
 @dataclass
 class ViewState:
     rel_path: str = ""                       # relative to the downloads folder
-    page: int = 0
-    entries: List[Entry] = field(default_factory=list)   # as last rendered (callbacks index into this)
+    entries: List[Entry] = field(default_factory=list)   # sub folders as last rendered (callbacks index into this)
+    preview_videos: List[str] = field(default_factory=list)   # absolute paths of the running folder preview
+    preview_pos: int = 0                     # how many of them were already sent
+    preview_label: str = ""
     selected: Optional[str] = None           # file name whose detail page is open
     pending_delete: Optional[str] = None     # absolute path awaiting confirmation
+
+
+@dataclass
+class PreviewBatch:
+    paths: List[str]                         # videos to screenshot now
+    names: List[str]                         # their display names (relative to the browsed folder)
+    text: str                                # progress text for the control message below the album
+    markup: Optional[InlineKeyboardMarkup]   # "next page" button, None when everything was shown
+    new_message: bool                        # True: first batch (pressed message is the folder list)
 
 
 @dataclass
@@ -218,6 +292,7 @@ class ViewResult:
     text: Optional[str]                      # None = nothing to edit
     markup: Optional[InlineKeyboardMarkup] = None
     preview_path: Optional[str] = None       # caller should send a preview of this file
+    batch: Optional[PreviewBatch] = None     # caller should send these folder-preview screenshots
 
 
 class FileViewer:
@@ -304,17 +379,23 @@ class FileViewer:
             entry = self._entry(state, arg)
             if entry and entry.is_dir:
                 state.rel_path = os.path.join(state.rel_path, entry.name)
-                state.page, state.selected = 0, None
-        elif action == 'fv_f':
-            entry = self._entry(state, arg)
-            if entry and not entry.is_dir:
-                state.selected = entry.name
-                return self._render_detail(user_id)
-        elif action == 'fv_pg':
-            state.page = int(arg) if arg.lstrip('-').isdigit() else 0
+                state.selected = None
+        elif action in ('fv_pv', 'fv_pva'):
+            directory = self._resolve(state.rel_path)
+            videos = list_videos(directory, action == 'fv_pva') if directory else []
+            if not videos:
+                return self._render_list(user_id, "❓ 沒有可預覽的影片\n\n")
+            state.preview_videos, state.preview_pos = videos, 0
+            where = self._display(state.rel_path)
+            state.preview_label = f"{where}（含子資料夾）" if action == 'fv_pva' else where
+            return ViewResult(None, batch=self._next_batch(state, True))
+        elif action == 'fv_pn':
+            if state.preview_pos >= len(state.preview_videos):
+                return ViewResult("⚠️ 預覽已結束或已過期，請重新選擇資料夾預覽")
+            return ViewResult(None, batch=self._next_batch(state, False))
         elif action == 'fv_up':
             state.rel_path = os.path.dirname(state.rel_path)
-            state.page, state.selected = 0, None
+            state.selected = None
         elif action == 'fv_back':
             state.selected = state.pending_delete = None
         elif action == 'fv_prev':
@@ -372,8 +453,23 @@ class FileViewer:
             logger.warning(f"檔案瀏覽：刪除失敗 {path}: {e}")
             note = f"❌ 刪除失敗：{e.strerror or e}\n\n"
         state.selected = None
-        state.page = 0
         return self._render_list(user_id, note)
+
+    def _next_batch(self, state: ViewState, new_message: bool) -> PreviewBatch:
+        start = state.preview_pos
+        paths = state.preview_videos[start:start + PREVIEW_BATCH]
+        state.preview_pos = start + len(paths)
+        total, shown = len(state.preview_videos), state.preview_pos
+        base = self._resolve(state.rel_path) or self._base()
+        names = [os.path.relpath(p, base) for p in paths]
+        text = f"🎞 {state.preview_label}\n已預覽 {shown}/{total} 部影片"
+        markup = None
+        if shown < total:
+            label = f"▶️ 下一頁（剩餘 {total - shown} 部）"
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="fv_pn")]])
+        else:
+            text += "\n✅ 已全部預覽"
+        return PreviewBatch(paths, names, text, markup, new_message)
 
     def _render_list(self, user_id: int, note: str = "") -> ViewResult:
         state = self._state(user_id)
@@ -382,42 +478,36 @@ class FileViewer:
             state.rel_path, directory = "", self._base()
 
         entries = self._list(directory)
-        state.entries = entries
+        folders = [e for e in entries if e.is_dir]
+        files = [e for e in entries if not e.is_dir]
+        state.entries = folders          # fv_cd indexes into the folders
         state.selected = state.pending_delete = None
-        pages = max(1, math.ceil(len(entries) / PAGE_SIZE))
-        state.page = min(max(state.page, 0), pages - 1)
 
-        folders = sum(1 for e in entries if e.is_dir)
-        files = len(entries) - folders
-        total = sum(e.size for e in entries if not e.is_dir)
+        counts = {'video': 0, 'photo': 0, 'other': 0}
+        for e in files:
+            ext = os.path.splitext(e.name)[1].lower()
+            counts['video' if ext in VIDEO_EXTS else 'photo' if ext in IMAGE_EXTS else 'other'] += 1
+        total = sum(e.size for e in files)
         lines = [f"📂 {self._display(state.rel_path)}",
-                 f"📁 {folders} 個資料夾 | 📄 {files} 個檔案 | {fmt_size(total)}"]
-        if pages > 1:
-            lines.append(f"第 {state.page + 1}/{pages} 頁")
+                 f"📁 {len(folders)} 個資料夾 | 影片 {counts['video']} 個 | 照片 {counts['photo']} 個 | "
+                 f"檔案 {counts['other']} 個 | {fmt_size(total)}"]
         if not entries:
             lines.append("（空資料夾）")
 
         keyboard = []
-        start = state.page * PAGE_SIZE
-        for offset, entry in enumerate(entries[start:start + PAGE_SIZE]):
-            index = start + offset
-            if entry.is_dir:
-                try:
-                    count = len(os.listdir(os.path.join(directory, entry.name)))
-                except OSError:
-                    count = 0
-                label, data = f"📁 {_short(entry.name)} ({count})", f"fv_cd:{index}"
-            else:
-                label, data = f"{file_icon(entry.name)} {_short(entry.name)} · {fmt_size(entry.size)}", f"fv_f:{index}"
-            keyboard.append([InlineKeyboardButton(label, callback_data=data)])
+        for i in range(0, len(folders), FOLDERS_PER_ROW):
+            row = []
+            for idx in range(i, min(i + FOLDERS_PER_ROW, len(folders))):
+                name = folders[idx].name
+                row.append(InlineKeyboardButton(f"📁 {_short(name)}", callback_data=f"fv_cd:{idx}"))
+            keyboard.append(row)
 
-        paging = []
-        if state.page > 0:
-            paging.append(InlineKeyboardButton("◀️ 上一頁", callback_data=f"fv_pg:{state.page - 1}"))
-        if state.page < pages - 1:
-            paging.append(InlineKeyboardButton("下一頁 ▶️", callback_data=f"fv_pg:{state.page + 1}"))
-        if paging:
-            keyboard.append(paging)
+        # video previews: this level, and (when any exist below) all sub folders
+        all_videos = len(list_videos(directory, True)) if folders or counts['video'] else 0
+        if counts['video']:
+            keyboard.append([InlineKeyboardButton(f"🎞 預覽資料夾影片 ({counts['video']})", callback_data="fv_pv")])
+        if all_videos > counts['video']:
+            keyboard.append([InlineKeyboardButton(f"🎞 預覽資料夾內所有影片 ({all_videos})", callback_data="fv_pva")])
 
         actions = []
         if state.rel_path:

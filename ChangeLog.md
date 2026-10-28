@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [2.7.1] - 2026-10-28 - Folder Video Preview
+### Added
+- `/files` folder video preview (`file_viewer.py` `list_videos`, `build_batch_preview`; `bot.py` `_send_preview_batch`): `🎞 預覽資料夾影片` (`fv_pv`) and `🎞 預覽資料夾內所有影片` (`fv_pva`, includes sub folders) send one 15s screenshot per video in albums of 10 (caption: path, time, source link); lazy `▶️ 下一頁` (`fv_pn`) adds the next 10 below, earlier albums are kept
+### Changed
+- `/files` list view works like the folder selector: no paging, all sub folders in a 2-per-row grid with media counts; files are no longer listed (detail/preview/delete via `/files <file path>`; `fv_f`/`fv_pg` removed)
+
 ## [2.7.0] - 2026-10-27 - Chat File Viewer
 ### Added
 - File viewer (`src/file_viewer.py` `FileViewer`, `bot.py` `handle_files_command`): owner-only `/files [folder-or-file]` (also in Telegram's command menu via `set_my_commands`) browses the downloads folder with inline buttons: folders first, files newest-first, 8 per page, item counts/sizes, hidden and `.part` files hidden, paging/up/close

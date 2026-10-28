@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.7.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.7.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -69,7 +69,7 @@ setup_build_env.bat
 - **src/monitor.py**: Real-time monitoring and progress tracking (`DownloadMonitor` class)
 - **src/database.py**: SQLite database management for download history and metadata
 - **src/folder_navigator.py**: Interactive folder navigation and path management system
-- **src/file_viewer.py**: Chat file viewer (`FileViewer`, `build_preview`, `source_link`) for `/files` (v2.7.0)
+- **src/file_viewer.py**: Chat file viewer (`FileViewer`, `build_preview`, `source_link`, plus `list_videos`, `build_batch_preview`, `build_frame_preview`, `PreviewBatch` for folder video previews, v2.7.1) for `/files` (v2.7.0)
 - **config/config.py**: Configuration management using environment variables from `.env` file
 
 ### URL Downloader Components (web/ package)
@@ -132,7 +132,7 @@ setup_build_env.bat
 Main orchestration class that coordinates all bot operations:
 - `start_client()`: Enhanced authentication with session validation and GUI support (v1.0.0)
 - `handle_message()`: Processes forwarded messages, folder name input, and routes to group/single processing
-- `handle_files_command()`: Owner-only `/files [path]` command (registered in the Telegram command menu via `set_my_commands`); `owner_id` is the Telethon session account (`get_me()`), others get "⛔ 只有 Bot 擁有者可以瀏覽檔案"; `_send_preview()` sends an image or 3 video screenshots (v2.7.0)
+- `handle_files_command()`: Owner-only `/files [path]` command (registered in the Telegram command menu via `set_my_commands`); `owner_id` is the Telethon session account (`get_me()`), others get "⛔ 只有 Bot 擁有者可以瀏覽檔案"; `_send_preview()` sends an image or 3 video screenshots (v2.7.0); `_send_preview_batch()` sends folder video previews as albums of 10 (1 screenshot per video, v2.7.1)
 - `handle_callback_query()`: Routes inline keyboard button presses (`fn_cd`, `fn_up`, `fn_ok`, `fn_cr`, `fn_prev`) (v2.1.0); `fv_*` callbacks go to `_handle_file_viewer_callback` (owner only, v2.7.0); `xp_media` / `xp_both` / `xp_shot` (X profile mode choice) are routed to `XProfileDownloader.on_mode_chosen` before the `fn_*` guard (v2.5.0)
 - `_handle_media_group()`: Collects and processes media group messages
 - `_download_and_monitor()`: Shared download and monitoring logic
@@ -170,10 +170,11 @@ Inline keyboard folder navigation and path management (v2.1.0):
 
 #### `FileViewer` (src/file_viewer.py)
 Inline-keyboard browser of the downloads folder for `/files` (v2.7.0):
-- `start(user_id, arg)` / `handle_callback(user_id, data)`: Render list/detail/confirm views, return `ViewResult(text, markup, preview_path)`; callbacks use the `fv_` prefix (page, up, open, close, preview, delete + confirm)
-- Listing: folders first, then files newest-first, 8 per page, hidden files and `.part` hidden; all paths confined to the downloads folder (`..`, absolute paths, outside symlinks rejected)
+- `start(user_id, arg)` / `handle_callback(user_id, data)`: Render list/detail/confirm views, return `ViewResult(text, markup, preview_path)`; callbacks use the `fv_` prefix: `fv_cd`, `fv_up`, `fv_pv`, `fv_pva`, `fv_pn`, `fv_back`, `fv_prev`, `fv_del`, `fv_deld`, `fv_yes`, `fv_no`, `fv_close` (`fv_f`/`fv_pg` removed in v2.7.1)
+- Listing (v2.7.1, modeled on `FolderNavigator._generate_folder_ui`): no paging and no files listed; all sub folders in a 2-per-row grid (names cut to 18 chars), text shows folder/video/photo/file counts + total size; empty folder offers `🗑 刪除此資料夾`; file detail/source/preview/delete only via `/files <file path>`; hidden files and `.part` hidden; all paths confined to the downloads folder (`..`, absolute paths, outside symlinks rejected)
+- Folder video preview (v2.7.1): `fv_pv` (`🎞 預覽資料夾影片 (n)`, this level, shown only if it has videos) and `fv_pva` (`🎞 預覽資料夾內所有影片 (n)`, recursive, shown only if sub folders add videos); `list_videos()` collects videos, `build_batch_preview()` returns a `PreviewBatch` of up to 10, each with ONE screenshot (`build_frame_preview()`: 15s, middle frame for videos under ~16s), caption = path relative to the browsed folder + timestamp + source link; `fv_pn` (`▶️ 下一頁（剩餘 n 部）`) sends the next 10 as a new album, previous albums kept, only the control message replaced, shows `已預覽 x/y 部影片`, unreadable videos skipped and counted
 - Detail view shows size, mtime, location, video duration/resolution, download time and the source link (`source_link()`: `t.me/c/<channel>/<message>`, original YouTube/X/Pornhub URL, `x.com/i/status/<id>` for X profile downloads, "未知" if unknown); record from `DatabaseManager.find_download(file_path)` (match by path, fallback file name + size)
-- `build_preview(path)`: image -> 1 photo; video -> 3 OpenCV frames (15s, middle, 15s before end; <45s uses 10%/50%/90%), run in an executor
+- `build_preview(path)` (single-file `🖼 預覽`, unchanged in v2.7.1): image -> 1 photo; video -> 3 OpenCV frames (15s, middle, 15s before end; <45s uses 10%/50%/90%), run in an executor
 - Delete with confirmation: files and empty folders only; the DB record is kept so the startup scan does not re-offer the file
 
 #### `XProfileDownloader` (web/x_profile_downloader.py)
@@ -219,7 +220,7 @@ telegram_auto_download/
 │   ├── database.py             # SQLite database management and operations
 │   ├── folder_navigator.py     # Interactive folder navigation system (260 lines)
 │   ├── auth_helper.py          # GUI/console authentication helper (197 lines, v1.0.0)
-│   ├── file_viewer.py          # /files chat file viewer (owner only, v2.7.0)
+│   ├── file_viewer.py          # /files chat file viewer (owner only, v2.7.0; folder video preview v2.7.1)
 │   ├── chromium_helper.py      # Chromium check/install for screenshots (v2.5.0)
 │   ├── ui.py                   # Main GUI application (tkinter interface, v1.3.0)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)

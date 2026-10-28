@@ -15,7 +15,7 @@ set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
 REM ===== Version constant =====
-set "APP_VERSION=2.7.0"
+set "APP_VERSION=2.7.1"
 REM ============================
 
 set "EXE_PATH=dist\TelegramAutoDownload\TelegramAutoDownload.exe"

@@ -17,7 +17,7 @@ from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
 from .database import DatabaseManager
-from .file_viewer import FileViewer, build_preview
+from .file_viewer import FileViewer, build_preview, build_batch_preview
 from config.config import get_startup_scan_count
 from web import url_parser
 
@@ -678,6 +678,8 @@ class TelegramMediaBot:
                 await self._safe_edit_markup(query.message, result.text, result.markup)
             if result.preview_path:
                 asyncio.create_task(self._send_preview(query.message, result.preview_path))
+            if result.batch:
+                asyncio.create_task(self._send_preview_batch(query.message, result.batch))
         except Exception as e:
             logger.error(f"檔案瀏覽處理失敗: {e}")
 
@@ -688,6 +690,32 @@ class TelegramMediaBot:
         except Exception as e:
             if "not modified" not in str(e).lower():
                 logger.warning(f"更新檔案瀏覽訊息失敗: {e}")
+
+    async def _send_preview_batch(self, message, batch):
+        """Folder preview: one screenshot per video as an album, then a fresh "next page" message
+        below it. Earlier albums are kept; only the old control message is removed."""
+        if batch.new_message:
+            status = await message.reply_text("🎞 正在產生預覽...")
+        else:
+            status = message
+            await self._safe_edit_markup(status, "🎞 正在產生預覽...", None)
+        try:
+            frames, failed = await asyncio.get_running_loop().run_in_executor(
+                None, build_batch_preview, batch.paths, batch.names)
+            if len(frames) == 1:
+                await message.reply_photo(frames[0][0], caption=frames[0][1])
+            elif frames:
+                await message.reply_media_group([InputMediaPhoto(d, caption=c) for d, c in frames])
+        except Exception as e:
+            logger.warning(f"資料夾預覽失敗: {e}")
+            await self._safe_edit_markup(status, f"❌ 預覽失敗: {e}", batch.markup)
+            return
+        text = batch.text + (f"\n⚠️ {failed} 部無法產生截圖" if failed else "")
+        await message.reply_text(text, reply_markup=batch.markup)
+        try:
+            await status.delete()
+        except Exception:
+            pass
 
     async def _send_preview(self, message, path: str):
         """Send an image, or 3 screenshots of a video (~15s in, middle, 15s before the end)."""
