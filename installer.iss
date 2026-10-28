@@ -3,8 +3,8 @@
 ; Do not use the same AppId value in installers for other applications.
 AppId={{A5B3C2D1-E4F6-4A7B-8C9D-1E2F3A4B5C6D}}
 AppName=Telegram Auto Download Bot
-AppVersion=2.7.1
-AppVerName=Telegram Auto Download Bot v2.7.1
+AppVersion=2.7.4
+AppVerName=Telegram Auto Download Bot v2.7.4
 AppPublisher=Telegram Auto Download Bot
 AppPublisherURL=https://github.com/your-repo/telegram_auto_download
 AppSupportURL=https://github.com/your-repo/telegram_auto_download/issues
@@ -14,10 +14,12 @@ DisableProgramGroupPage=yes
 ; Remove the following line to run in administrative install mode (install for all users)
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=TelegramAutoDownload-Setup-v2.7.1
+OutputBaseFilename=TelegramAutoDownload-Setup-v2.7.4
 SetupIconFile=assets\icon.ico
-Compression=lzma
+; lzma2/fast: ~6s instead of ~90s for a slightly bigger installer (104 MB -> 132 MB)
+Compression=lzma2/fast
 SolidCompression=yes
+LZMANumBlockThreads=8
 WizardStyle=modern
 UninstallDisplayIcon={app}\TelegramAutoDownload.exe
 UninstallDisplayName=Telegram Auto Download Bot
@@ -28,7 +30,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
-Name: "startmenu"; Description: "Create Start Menu entry"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+Name: "startmenu"; Description: "Create Start Menu entry"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "dist\TelegramAutoDownload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -97,14 +99,25 @@ begin
   end;
 end;
 
-function InitializeSetup(): Boolean;
+// Close the running app (tray apps ignore a polite close, so force it after a short wait)
+procedure CloseRunningApp();
+var
+  rc: Integer;
 begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/T /IM TelegramAutoDownload.exe', '', SW_HIDE, ewWaitUntilTerminated, rc);
+  Sleep(1500);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM TelegramAutoDownload.exe', '', SW_HIDE, ewWaitUntilTerminated, rc);
+  Sleep(500);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  CloseRunningApp();
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  CloseRunningApp();
   Result := True;
-  
-  // Check if application is already running
-  if CheckForMutexes('TelegramAutoDownloadBotMutex') then
-  begin
-    if MsgBox('Telegram Auto Download Bot is currently running. Please close it before continuing with the installation.', mbError, MB_OKCANCEL) = IDCANCEL then
-      Result := False;
-  end;
 end;

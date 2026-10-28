@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.7.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.7.4) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -36,15 +36,7 @@ pip install -r requirements.txt
 
 ### Version Management
 
-```bash
-# Bump version (minor increment)
-bump_version.bat
-
-# Or use bump2version directly
-bump2version minor
-bump2version patch
-bump2version major
-```
+Use the `/update-release <version> <changes>` command (`.claude/commands/update-release.md`): it bumps the version in `app.manifest`, `installer.iss`, `package_windows.bat`, `create_version_info.py`, `src/__init__.py`, `src/ui.py`, `README.md` and this file, then updates the docs.
 
 ### Build Environment Setup
 
@@ -170,9 +162,10 @@ Inline keyboard folder navigation and path management (v2.1.0):
 
 #### `FileViewer` (src/file_viewer.py)
 Inline-keyboard browser of the downloads folder for `/files` (v2.7.0):
-- `start(user_id, arg)` / `handle_callback(user_id, data)`: Render list/detail/confirm views, return `ViewResult(text, markup, preview_path)`; callbacks use the `fv_` prefix: `fv_cd`, `fv_up`, `fv_pv`, `fv_pva`, `fv_pn`, `fv_back`, `fv_prev`, `fv_del`, `fv_deld`, `fv_yes`, `fv_no`, `fv_close` (`fv_f`/`fv_pg` removed in v2.7.1)
-- Listing (v2.7.1, modeled on `FolderNavigator._generate_folder_ui`): no paging and no files listed; all sub folders in a 2-per-row grid (names cut to 18 chars), text shows folder/video/photo/file counts + total size; empty folder offers `🗑 刪除此資料夾`; file detail/source/preview/delete only via `/files <file path>`; hidden files and `.part` hidden; all paths confined to the downloads folder (`..`, absolute paths, outside symlinks rejected)
+- `start(user_id, arg)` / `handle_callback(user_id, data)`: Render list/detail/confirm views, return `ViewResult(text, markup, preview_path)`; callbacks use the `fv_` prefix: `fv_cd`, `fv_f`, `fv_up`, `fv_pv`, `fv_pva`, `fv_pn`, `fv_back`, `fv_prev`, `fv_del`, `fv_deld`, `fv_yes`, `fv_no`, `fv_close` (`fv_pg` removed in v2.7.1; `fv_f` restored in v2.7.4)
+- Listing (v2.7.1, modeled on `FolderNavigator._generate_folder_ui`): no paging; all sub folders in a 2-per-row grid (names cut to 18 chars), text shows folder/video/photo/file counts + total size; empty folder offers `🗑 刪除此資料夾`; the newest `MAX_FILE_BUTTONS` (30) files of the level are listed below the folders as `fv_f:<index>` buttons (index into `state.entries` = folders + shown files) opening the detail view (also via `/files <file path>`); hidden files and `.part` hidden; all paths confined to the downloads folder (`..`, absolute paths, outside symlinks rejected)
 - Folder video preview (v2.7.1): `fv_pv` (`🎞 預覽資料夾影片 (n)`, this level, shown only if it has videos) and `fv_pva` (`🎞 預覽資料夾內所有影片 (n)`, recursive, shown only if sub folders add videos); `list_videos()` collects videos, `build_batch_preview()` returns a `PreviewBatch` of up to 10, each with ONE screenshot (`build_frame_preview()`: 15s, middle frame for videos under ~16s), caption = path relative to the browsed folder + timestamp + source link; `fv_pn` (`▶️ 下一頁（剩餘 n 部）`) sends the next 10 as a new album, previous albums kept, only the control message replaced, shows `已預覽 x/y 部影片`, unreadable videos skipped and counted
+- Folder photo loading (v2.7.3): `fv_ph` (`🖼 載入照片 (n)`, this level) and `fv_pha` (`🖼 載入所有照片 (n)`, recursive) reuse the `fv_pn` lazy paging; `list_photos()`/`list_media()` collect files, `build_batch_preview()` returns a thumbnail per photo (`build_image_preview()`), `ViewState.preview_kind` is `video` or `photo`
 - Detail view shows size, mtime, location, video duration/resolution, download time and the source link (`source_link()`: `t.me/c/<channel>/<message>`, original YouTube/X/Pornhub URL, `x.com/i/status/<id>` for X profile downloads, "未知" if unknown); record from `DatabaseManager.find_download(file_path)` (match by path, fallback file name + size)
 - `build_preview(path)` (single-file `🖼 預覽`, unchanged in v2.7.1): image -> 1 photo; video -> 3 OpenCV frames (15s, middle, 15s before end; <45s uses 10%/50%/90%), run in an executor
 - Delete with confirmation: files and empty folders only; the DB record is kept so the startup scan does not re-offer the file
@@ -236,12 +229,10 @@ telegram_auto_download/
 ├── main.py                     # Unified application entry point (CLI/GUI)
 ├── package_windows.bat         # Windows installer build script (v1.0.0)
 ├── setup_build_env.bat         # Build environment setup script
-├── bump_version.bat            # Version bumping script
 ├── telegram_bot.spec           # PyInstaller configuration (v1.0.0)
 ├── installer.iss               # Inno Setup installer configuration (v1.0.0)
 ├── create_version_info.py      # Version info generator (v1.0.0)
 ├── create_icon.py              # Application icon generator (v1.0.0)
-├── pyproject.toml              # Project configuration and version management
 ├── ChangeLog.md                # Version history and release notes
 ├── downloads/                  # User-organized backup directory with folder structure
 ├── logs/                       # Log files directory (auto-created)

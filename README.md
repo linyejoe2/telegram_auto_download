@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.7.1
+# Telegram Auto Download Bot v2.7.4
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -42,7 +42,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.7.1.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.7.4.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -156,9 +156,10 @@ On startup the bot checks the last `STARTUP_SCAN_COUNT` messages you sent it (de
 
 ## 📂 File Viewer
 
-Send `/files` (owner only; also in the Telegram command menu) to browse the downloads folder with inline buttons, the same way as the folder selector: all sub folders of the current level in a 2-per-row grid (no paging, files are not listed), with folder/video/photo/file counts and total size. `/files <folder-or-file>` opens that path directly; a file path opens the file details. Hidden files and unfinished `.part` downloads are not shown.
+Send `/files` (owner only; also in the Telegram command menu) to browse the downloads folder with inline buttons, the same way as the folder selector: all sub folders of the current level in a 2-per-row grid (no paging), followed by the newest 30 files of the level (tap one for its details, source link, preview and delete), with folder/video/photo/file counts and total size. `/files <folder-or-file>` opens that path directly; a file path opens the file details. Hidden files and unfinished `.part` downloads are not shown.
 
 - **Folder video preview:** `🎞 預覽資料夾影片 (n)` sends one screenshot (at 15s) of every video in the current folder as albums of 10, captioned with the relative path, timestamp and source link; `🎞 預覽資料夾內所有影片 (n)` also includes sub folders (shown only when they add videos). `▶️ 下一頁（剩餘 n 部）` generates the next 10 below the previous albums and shows `已預覽 x/y 部影片`; unreadable videos are skipped.
+- **Folder photo loading (v2.7.3):** `🖼 載入照片 (n)` / `🖼 載入所有照片 (n)` (with sub folders) send the folder's photos as albums of 10 (caption: relative path, size, source link) with the same lazy `▶️ 下一頁`.
 
 - **Details & source link:** `/files <file path>` shows size, modified time, location, video duration/resolution and download time, plus its source and a `🔗 開啟來源` button (Telegram post `https://t.me/c/<channel>/<message>`, the original YouTube/X/Pornhub URL, or `https://x.com/i/status/<id>` for X account downloads; "未知" if the file has no download record).
 - **Single-file preview (`🖼 預覽`):** images are sent as a photo; videos as an album of 3 screenshots (at 15s, the middle and 15s before the end; videos under 45s use 10%/50%/90%).

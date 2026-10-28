@@ -1,1 +1,0 @@
-bump-my-version bump minor --verbose --allow-dirty

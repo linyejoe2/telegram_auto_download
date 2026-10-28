@@ -710,7 +710,7 @@ class TelegramMediaBot:
             logger.warning(f"資料夾預覽失敗: {e}")
             await self._safe_edit_markup(status, f"❌ 預覽失敗: {e}", batch.markup)
             return
-        text = batch.text + (f"\n⚠️ {failed} 部無法產生截圖" if failed else "")
+        text = batch.text + (f"\n⚠️ {failed} 個無法產生預覽" if failed else "")
         await message.reply_text(text, reply_markup=batch.markup)
         try:
             await status.delete()

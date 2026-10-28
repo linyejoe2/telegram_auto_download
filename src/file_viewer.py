@@ -9,7 +9,7 @@ batches: this folder, or recursively all sub folders), file details (reachable w
 the bot owns the Telegram I/O and the owner check.
 
 Callback data (all prefixed `fv_`, index based so they stay under Telegram's 64-byte limit):
-  fv_cd:i  fv_up  fv_pv  fv_pva  fv_pn  fv_back  fv_prev  fv_del  fv_deld  fv_yes  fv_no  fv_close
+  fv_cd:i  fv_f:i  fv_up  fv_pv  fv_pva  fv_ph  fv_pha  fv_pn  fv_back  fv_prev  fv_del  fv_deld  fv_yes  fv_no  fv_close
 """
 
 import io
@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 NAME_LIMIT = 18
 PREVIEW_EDGE_SECONDS = 15
 FOLDERS_PER_ROW = 2
+MAX_FILE_BUTTONS = 30             # files listed under the folders (no paging; Telegram caps a keyboard at 100 buttons)
+FILE_NAME_LIMIT = 26
 PREVIEW_BATCH = 10              # one Telegram album
 PREVIEW_FRAME_SECONDS = 15      # the single screenshot of a folder preview
 PREVIEW_MAX_WIDTH = 1280
@@ -219,10 +221,10 @@ def build_frame_preview(path: str) -> Tuple[bytes, str]:
         cap.release()
 
 
-def list_videos(directory: str, recursive: bool) -> List[str]:
-    """Video files of a folder (optionally with all sub folders), grouped by folder, sorted by name."""
+def list_media(directory: str, recursive: bool, exts: set) -> List[str]:
+    """Files with one of `exts` in a folder (optionally with all sub folders), grouped by folder, sorted by name."""
     def is_video(name: str) -> bool:
-        return not name.startswith('.') and os.path.splitext(name)[1].lower() in VIDEO_EXTS
+        return not name.startswith('.') and os.path.splitext(name)[1].lower() in exts
 
     found: List[str] = []
     try:
@@ -239,12 +241,23 @@ def list_videos(directory: str, recursive: bool) -> List[str]:
     return found
 
 
+def list_videos(directory: str, recursive: bool) -> List[str]:
+    return list_media(directory, recursive, VIDEO_EXTS)
+
+
+def list_photos(directory: str, recursive: bool) -> List[str]:
+    return list_media(directory, recursive, IMAGE_EXTS)
+
+
 def build_batch_preview(paths: List[str], names: List[str]) -> Tuple[List[Tuple[bytes, str]], int]:
-    """[(jpeg, caption)] for each readable video, plus the number that failed. Blocking."""
+    """[(jpeg, caption)] for each readable video (1 screenshot) / photo, plus the number that failed. Blocking."""
     frames, failed = [], 0
     for path, name in zip(paths, names):
         try:
-            data, label = build_frame_preview(path)
+            if os.path.splitext(path)[1].lower() in IMAGE_EXTS:
+                data, label = build_image_preview(path)[0]
+            else:
+                data, label = build_frame_preview(path)
         except Exception as e:
             logger.warning(f"預覽失敗 {path}: {e}")
             failed += 1
@@ -271,8 +284,9 @@ class Entry:
 class ViewState:
     rel_path: str = ""                       # relative to the downloads folder
     entries: List[Entry] = field(default_factory=list)   # sub folders as last rendered (callbacks index into this)
-    preview_videos: List[str] = field(default_factory=list)   # absolute paths of the running folder preview
+    preview_files: List[str] = field(default_factory=list)    # absolute paths of the running folder preview
     preview_pos: int = 0                     # how many of them were already sent
+    preview_kind: str = "video"              # "video" or "photo"
     preview_label: str = ""
     selected: Optional[str] = None           # file name whose detail page is open
     pending_delete: Optional[str] = None     # absolute path awaiting confirmation
@@ -380,17 +394,25 @@ class FileViewer:
             if entry and entry.is_dir:
                 state.rel_path = os.path.join(state.rel_path, entry.name)
                 state.selected = None
-        elif action in ('fv_pv', 'fv_pva'):
+        elif action == 'fv_f':
+            entry = self._entry(state, arg)
+            if entry and not entry.is_dir:
+                state.selected = entry.name
+                return self._render_detail(user_id)
+        elif action in ('fv_pv', 'fv_pva', 'fv_ph', 'fv_pha'):
+            kind = 'photo' if action in ('fv_ph', 'fv_pha') else 'video'
+            recursive = action in ('fv_pva', 'fv_pha')
             directory = self._resolve(state.rel_path)
-            videos = list_videos(directory, action == 'fv_pva') if directory else []
-            if not videos:
-                return self._render_list(user_id, "❓ 沒有可預覽的影片\n\n")
-            state.preview_videos, state.preview_pos = videos, 0
+            lister = list_photos if kind == 'photo' else list_videos
+            files = lister(directory, recursive) if directory else []
+            if not files:
+                return self._render_list(user_id, "❓ 沒有可載入的" + ("照片" if kind == 'photo' else "影片") + "\n\n")
+            state.preview_files, state.preview_pos, state.preview_kind = files, 0, kind
             where = self._display(state.rel_path)
-            state.preview_label = f"{where}（含子資料夾）" if action == 'fv_pva' else where
+            state.preview_label = f"{where}（含子資料夾）" if recursive else where
             return ViewResult(None, batch=self._next_batch(state, True))
         elif action == 'fv_pn':
-            if state.preview_pos >= len(state.preview_videos):
+            if state.preview_pos >= len(state.preview_files):
                 return ViewResult("⚠️ 預覽已結束或已過期，請重新選擇資料夾預覽")
             return ViewResult(None, batch=self._next_batch(state, False))
         elif action == 'fv_up':
@@ -457,18 +479,20 @@ class FileViewer:
 
     def _next_batch(self, state: ViewState, new_message: bool) -> PreviewBatch:
         start = state.preview_pos
-        paths = state.preview_videos[start:start + PREVIEW_BATCH]
+        paths = state.preview_files[start:start + PREVIEW_BATCH]
         state.preview_pos = start + len(paths)
-        total, shown = len(state.preview_videos), state.preview_pos
+        total, shown = len(state.preview_files), state.preview_pos
+        photo = state.preview_kind == 'photo'
+        unit = "張照片" if photo else "部影片"
         base = self._resolve(state.rel_path) or self._base()
         names = [os.path.relpath(p, base) for p in paths]
-        text = f"🎞 {state.preview_label}\n已預覽 {shown}/{total} 部影片"
+        text = f"{'🖼' if photo else '🎞'} {state.preview_label}\n已{'載入' if photo else '預覽'} {shown}/{total} {unit}"
         markup = None
         if shown < total:
-            label = f"▶️ 下一頁（剩餘 {total - shown} 部）"
+            label = f"▶️ 下一頁（剩餘 {total - shown} {unit[0]}）"
             markup = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="fv_pn")]])
         else:
-            text += "\n✅ 已全部預覽"
+            text += "\n✅ 已全部" + ("載入" if photo else "預覽")
         return PreviewBatch(paths, names, text, markup, new_message)
 
     def _render_list(self, user_id: int, note: str = "") -> ViewResult:
@@ -480,7 +504,8 @@ class FileViewer:
         entries = self._list(directory)
         folders = [e for e in entries if e.is_dir]
         files = [e for e in entries if not e.is_dir]
-        state.entries = folders          # fv_cd indexes into the folders
+        shown_files = files[:MAX_FILE_BUTTONS]          # newest first
+        state.entries = folders + shown_files          # fv_cd / fv_f index into this (folders first)
         state.selected = state.pending_delete = None
 
         counts = {'video': 0, 'photo': 0, 'other': 0}
@@ -502,12 +527,26 @@ class FileViewer:
                 row.append(InlineKeyboardButton(f"📁 {_short(name)}", callback_data=f"fv_cd:{idx}"))
             keyboard.append(row)
 
+        # files of this level (newest first) -> tap for details / source link / preview / delete
+        for offset, entry in enumerate(shown_files):
+            label = f"{file_icon(entry.name)} {_short(entry.name, FILE_NAME_LIMIT)} · {fmt_size(entry.size)}"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"fv_f:{len(folders) + offset}")])
+        if len(files) > len(shown_files):
+            lines.append(f"（只列出最新 {len(shown_files)} 個檔案，共 {len(files)} 個）")
+
         # video previews: this level, and (when any exist below) all sub folders
         all_videos = len(list_videos(directory, True)) if folders or counts['video'] else 0
         if counts['video']:
             keyboard.append([InlineKeyboardButton(f"🎞 預覽資料夾影片 ({counts['video']})", callback_data="fv_pv")])
         if all_videos > counts['video']:
             keyboard.append([InlineKeyboardButton(f"🎞 預覽資料夾內所有影片 ({all_videos})", callback_data="fv_pva")])
+
+        # photo loading: same idea
+        all_photos = len(list_photos(directory, True)) if folders or counts['photo'] else 0
+        if counts['photo']:
+            keyboard.append([InlineKeyboardButton(f"🖼 載入照片 ({counts['photo']})", callback_data="fv_ph")])
+        if all_photos > counts['photo']:
+            keyboard.append([InlineKeyboardButton(f"🖼 載入所有照片 ({all_photos})", callback_data="fv_pha")])
 
         actions = []
         if state.rel_path:

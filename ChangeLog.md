@@ -1,5 +1,19 @@
 # ChangeLog
 
+## [2.7.4] - 2026-10-28 - File Detail Button Restored
+### Fixed
+- `/files` list shows the newest 30 files of a level again as `fv_f` buttons (below the folders, no paging) so file details, source link, preview and delete are reachable by tapping
+
+## [2.7.3] - 2026-10-28 - Folder Photo Loading
+### Added
+- `/files` folder photo loading: `🖼 載入照片 (n)` (`fv_ph`, this level) and `🖼 載入所有照片 (n)` (`fv_pha`, includes sub folders) send photos in albums of 10 with the same lazy `▶️ 下一頁` (`fv_pn`); `list_photos`/`list_media` in `file_viewer.py`
+
+## [2.7.2] - 2026-10-28 - Installer Update
+### Changed
+- Installer: "Create Start Menu entry" is ticked by default; a running `TelegramAutoDownload.exe` is closed automatically before install/upgrade/uninstall; compression `lzma2/fast` (build step ~90s -> ~6s, installer 104 MB -> 132 MB)
+### Removed
+- `bump_version.bat`, `pyproject.toml` (bumpversion config) and `bump2version`; use `/update-release`
+
 ## [2.7.1] - 2026-10-28 - Folder Video Preview
 ### Added
 - `/files` folder video preview (`file_viewer.py` `list_videos`, `build_batch_preview`; `bot.py` `_send_preview_batch`): `🎞 預覽資料夾影片` (`fv_pv`) and `🎞 預覽資料夾內所有影片` (`fv_pva`, includes sub folders) send one 15s screenshot per video in albums of 10 (caption: path, time, source link); lazy `▶️ 下一頁` (`fv_pn`) adds the next 10 below, earlier albums are kept
