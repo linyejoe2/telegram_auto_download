@@ -1,5 +1,9 @@
 # ChangeLog
 
+## [2.7.6] - 2026-11-04 - Rescan Command
+### Added
+- Owner-only `/rescan [count]` (also in the command menu; `bot.py` `handle_rescan_command`, `_scan_recent`): runs the startup scan on demand over the last `STARTUP_SCAN_COUNT` (or `count`) messages and queues what is not downloaded; items already waiting in the queue are not queued twice, and the result is always reported in the chat
+
 ## [2.7.5] - 2026-10-28 - Load Video
 ### Added
 - File detail `📤 載入影片` (`fv_load`): sends the video to the chat through Telethon (second session logged in as the bot, `src/bot.py` `_load_video`) instead of the Bot API, so the 50 MB limit does not apply (up to 2 GB)

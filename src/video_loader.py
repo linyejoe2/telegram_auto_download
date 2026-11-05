@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 COMPRESSED_SUFFIX = ".720p_h265"
 COMPRESS_IF_LARGER_THAN = 500 * 1024 * 1024   # bytes
 COMPRESS_IF_BITRATE_ABOVE = 4000              # kbps (overall, audio included)
-MAX_UPLOAD_BYTES = 2000 * 1000 * 1000         # Telegram's MTProto limit for non-premium accounts is 2 GB
+MAX_UPLOAD_BYTES = 500 * 1000 * 1000         # Telegram's MTProto limit for non-premium accounts is 0.5 GB
 TARGET_HEIGHT = 720
 TARGET_BITRATE_KBPS = 2000
 

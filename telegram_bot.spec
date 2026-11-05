@@ -111,6 +111,7 @@ hiddenimports = [
     'cryptography.hazmat.backends',
     'rsa',
     'pyaes',
+    'cryptg',  # native AES for Telethon: faster uploads/downloads
 
     # custom
     'imagehash',

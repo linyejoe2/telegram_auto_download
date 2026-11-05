@@ -98,6 +98,8 @@ class TelegramMediaBot:
         self._current_item = None
         self.queue_task = None
         self.scan_task = None
+        self.rescan_task = None
+        self._scan_items = {}            # scan unit key -> its queued FlowItem (no duplicates on /rescan)
 
         # file viewer (/files): browse / preview / delete downloaded files - owner only
         self.owner_id = None
@@ -145,6 +147,7 @@ class TelegramMediaBot:
         # Bot Application (python-telegram-bot)
         self.app = Application.builder().token(bot_token).build()
         self.app.add_handler(CommandHandler('files', self.handle_files_command))
+        self.app.add_handler(CommandHandler('rescan', self.handle_rescan_command))
         self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
 
@@ -742,7 +745,7 @@ class TelegramMediaBot:
                 upload_path, note = ready, f"🗜 {TARGET_HEIGHT}p H.265（使用已壓縮的預覽檔）"
             elif find_ffmpeg() is None:
                 if os.path.getsize(path) > MAX_UPLOAD_BYTES:
-                    raise RuntimeError("影片超過 2GB 且找不到 ffmpeg（請安裝並加入 PATH，或設定 FFMPEG_PATH）")
+                    raise RuntimeError("影片超過 0.5GB 且找不到 ffmpeg（請安裝並加入 PATH，或設定 FFMPEG_PATH）")
                 note = "⚠️ 找不到 ffmpeg，已傳送原檔"
             else:
                 box = {'p': 0.0}
@@ -1026,14 +1029,31 @@ class TelegramMediaBot:
         else:
             await url_parser.handle_url(unit[1], unit[2], item.user_id, item.message, self.folder_navigator)
 
+    @staticmethod
+    def _scan_key(unit):
+        """Identity of a scan unit, so a repeated scan does not queue what is already waiting."""
+        if unit[0] == 'media':
+            return ('media', tuple((getattr(m, 'chat_id', None), m.id) for m in unit[2]))
+        return ('url', unit[1])
+
+    def _scan_item_active(self, item) -> bool:
+        return item is self._current_item or item in self._items
+
     async def _startup_scan(self):
         """Look at the user's last N messages to the bot; queue every item that isn't downloaded yet."""
         limit = get_startup_scan_count()
         if limit <= 0:
             logger.info('啟動掃描已停用 (STARTUP_SCAN_COUNT=0)')
             return
+        await asyncio.sleep(2)  # let polling come up first
+        await self._scan_recent(limit)
+
+    async def _scan_recent(self, limit: int, manual: bool = False):
+        """Queue undownloaded items among the last `limit` messages the user sent the bot.
+
+        Used at startup and by /rescan (manual=True: always reports back in the chat).
+        """
         try:
-            await asyncio.sleep(2)  # let polling come up first
             bot_user = await self.app.bot.get_me()
             entity = await self.client.get_entity(bot_user.username)
             me = await self.client.get_me()
@@ -1045,27 +1065,56 @@ class TelegramMediaBot:
                     if len(sent) >= limit:
                         break
             sent.reverse()
-            logger.info(f'啟動掃描：檢查最近 {len(sent)} 則已發送給 Bot 的訊息...')
+            logger.info(f'{"重新" if manual else "啟動"}掃描：檢查最近 {len(sent)} 則已發送給 Bot 的訊息...')
 
             units = await self._find_undownloaded(sent)
-            if not units:
-                logger.info('啟動掃描：最近的訊息都已下載')
+            waiting = {k: i for k, i in self._scan_items.items() if self._scan_item_active(i)}
+            self._scan_items = waiting
+            fresh = [u for u in units if self._scan_key(u) not in waiting]
+
+            if not fresh:
+                logger.info('掃描：沒有新的未下載項目')
+                if manual:
+                    already = len(units) - len(fresh)
+                    extra = f"（另有 {already} 個已在佇列中）" if already else ""
+                    await self.app.bot.send_message(
+                        chat_id=me.id, text=f"🔎 重新掃描（最近 {len(sent)} 則訊息）：沒有新的未下載項目{extra}")
                 return
 
+            title = "重新掃描" if manual else "啟動掃描"
             await self.app.bot.send_message(
                 chat_id=me.id,
-                text=(f"🔎 啟動掃描（最近 {len(sent)} 則訊息）發現 {len(units)} 個項目尚未下載。\n"
+                text=(f"🔎 {title}（最近 {len(sent)} 則訊息）發現 {len(fresh)} 個項目尚未下載。\n"
                       f"會逐一詢問存放位置，每個項目下載完成後才出現下一個；不想下載的可按「❌ 取消」略過。"),
             )
-            for unit in units:
+            for unit in fresh:
                 item = FlowItem(unit[1], me.id, None, None)
                 item.present = partial(self._present_scan_unit, item, unit)
+                self._scan_items[self._scan_key(unit)] = item
                 await self.enqueue_flow(item)
-            logger.info(f'啟動掃描：{len(units)} 個尚未下載的項目已加入佇列')
+            logger.info(f'掃描：{len(fresh)} 個尚未下載的項目已加入佇列')
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f'啟動掃描失敗: {e}')
+            logger.error(f'{"重新" if manual else "啟動"}掃描失敗: {e}')
+            if manual:
+                try:
+                    await self.app.bot.send_message(chat_id=self.owner_id, text=f"❌ 重新掃描失敗: {e}")
+                except Exception:
+                    pass
+
+    async def handle_rescan_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Owner-only /rescan [count]: run the startup scan again on demand."""
+        if not self._is_owner(update.effective_user.id):
+            await update.message.reply_text("⛔ 只有 Bot 擁有者可以使用 /rescan")
+            return
+        if self.rescan_task and not self.rescan_task.done():
+            await update.message.reply_text("⏳ 正在掃描中，請稍候")
+            return
+        arg = (context.args or [""])[0]
+        limit = int(arg) if arg.isdigit() and int(arg) > 0 else (get_startup_scan_count() or 30)
+        await update.message.reply_text(f"🔎 開始掃描最近 {limit} 則訊息...")
+        self.rescan_task = asyncio.create_task(self._scan_recent(limit, manual=True))
 
     # ---------------------- utilities ----------------------
     def get_download_statistics(self):
@@ -1090,7 +1139,10 @@ class TelegramMediaBot:
             logger.info('正在啟動 Telegram Bot...')
             await self.app.initialize()
             try:
-                await self.app.bot.set_my_commands([BotCommand('files', '瀏覽 / 預覽 / 刪除已下載的檔案')])
+                await self.app.bot.set_my_commands([
+                    BotCommand('files', '瀏覽 / 預覽 / 刪除已下載的檔案'),
+                    BotCommand('rescan', '重新掃描最近的訊息，找出尚未下載的項目'),
+                ])
             except Exception as e:
                 logger.warning(f'設定 Bot 指令選單失敗: {e}')
             await self.app.start()
@@ -1107,7 +1159,7 @@ class TelegramMediaBot:
         except Exception as e:
             logger.error(f'Bot 運行出錯: {e}')
         finally:
-            background = [t for t in (self.scan_task, self.queue_task) if t]
+            background = [t for t in (self.scan_task, self.rescan_task, self.queue_task) if t]
             for task in background:
                 task.cancel()
             await asyncio.gather(*background, return_exceptions=True)
