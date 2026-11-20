@@ -1,5 +1,9 @@
 # ChangeLog
 
+## [2.7.7] - 2026-11-20 - t.me Link Download
+### Added
+- Owner-only `t.me/<channel>/<id>` and `t.me/c/<id>/<id>` link download (`bot.py` `parse_tme_link`, `_handle_tme_link`): media is read through the logged-in Telethon account, so "restrict saving content" chats work; `?single` downloads only that message, otherwise the whole album and media replies, then the usual folder selector
+
 ## [2.7.6] - 2026-11-04 - Rescan Command
 ### Added
 - Owner-only `/rescan [count]` (also in the command menu; `bot.py` `handle_rescan_command`, `_scan_recent`): runs the startup scan on demand over the last `STARTUP_SCAN_COUNT` (or `count`) messages and queues what is not downloaded; items already waiting in the queue are not queued twice, and the result is always reported in the chat

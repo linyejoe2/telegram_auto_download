@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import sys
 import logging
 import time
@@ -10,7 +11,7 @@ from functools import partial
 from typing import Awaitable, Callable
 from telethon import TelegramClient
 from telethon.errors import RPCError
-from telethon.tl.types import DocumentAttributeVideo
+from telethon.tl.types import DocumentAttributeVideo, PeerChannel
 from telegram import Update, BotCommand, InputMediaPhoto
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
 
@@ -66,6 +67,23 @@ except Exception as e:
 logger = logging.getLogger(__name__)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telethon.client.updates').setLevel(logging.WARNING)
+
+
+# t.me/<username>/<id>, t.me/c/<channel id>/<id> (also .../<topic id>/<id>), optional ?single
+_TME_RE = re.compile(
+    r'https?://(?:www\.)?(?:t|telegram)\.me/(?:c/(?P<cid>\d+)|(?P<user>[A-Za-z][A-Za-z0-9_]{3,}))'
+    r'/(?:\d+/)?(?P<mid>\d+)(?P<query>\?\S*)?',
+    re.IGNORECASE,
+)
+
+
+def parse_tme_link(text: str):
+    """{'cid', 'user', 'mid', 'single'} for the first t.me message link in `text`, else None."""
+    m = _TME_RE.search(text or '')
+    if not m:
+        return None
+    return {'cid': m.group('cid'), 'user': m.group('user'), 'mid': int(m.group('mid')),
+            'single': 'single' in (m.group('query') or '').lower()}
 
 
 @dataclass
@@ -454,6 +472,15 @@ class TelegramMediaBot:
                 await msg.reply_text(text, reply_markup=markup)
             return
 
+        # t.me message link: read through the logged-in Telethon account (works for "restrict saving content" chats)
+        link = parse_tme_link(msg.text) if msg.text else None
+        if link:
+            if not self._is_owner(user_id):
+                await msg.reply_text("⛔ 只有 Bot 擁有者可以使用 t.me 連結下載")
+            else:
+                await self._handle_tme_link(msg, user_id, link)
+            return
+
         # Detect URL (e.g. YouTube link)
         if msg.text:
             detected_url = url_parser.extract_url(msg.text)
@@ -549,6 +576,35 @@ class TelegramMediaBot:
         except Exception as e:
             logger.error(f'處理媒體組錯誤: {e}')
             await processing_msg.edit_text(f'❌ 處理媒體組時出錯: {e}')
+
+    async def _handle_tme_link(self, msg, user_id: int, link: dict):
+        """Download the media behind a t.me link with the user account's session (the owner's own login)."""
+        processing_msg = await msg.reply_text('📡 正在透過登入帳號讀取連結訊息...')
+        try:
+            peer = PeerChannel(int(link['cid'])) if link['cid'] else link['user']
+            original, replies = await self.get_message_and_replies(peer, link['mid'])
+            if not original:
+                await processing_msg.edit_text('❌ 讀取不到這則訊息：請確認登入的帳號可以看到它（需已加入該頻道/群組）')
+                return
+
+            if link['single']:
+                messages = [original] if getattr(original, 'media', None) else []
+            else:
+                messages = await self._collect_media_from_original(peer, original) or (
+                    [original] if getattr(original, 'media', None) else [])
+                messages += [r for r in replies if getattr(r, 'media', None) and r not in messages]
+
+            if not messages:
+                await processing_msg.edit_text('ℹ️ 這則訊息沒有可下載的媒體文件')
+                return
+
+            await self.submit_flow(
+                user_id, f"{len(messages)} 個媒體", processing_msg,
+                partial(self._prepare_folder_selection, user_id, messages, processing_msg),
+            )
+        except Exception as e:
+            logger.error(f'處理 t.me 連結時出錯: {e}')
+            await processing_msg.edit_text(f'❌ 處理時出錯: {e}')
 
     async def _handle_forwarded_single(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = update.message

@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v2.7.6
+# Telegram Auto Download Bot v2.7.7
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -42,7 +42,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v2.7.6.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v2.7.7.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -147,6 +147,10 @@ Then choose a mode with the inline buttons:
 After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<username>/` (screenshots in `screenshots/`). Media files are named `<tweetid>_<n>.<ext>` and duplicates are skipped. Posts without media are counted but never downloaded or screenshotted.
 
 > **Note:** You must be logged in to X in Firefox on the same machine. Screenshots require a one-time Chromium install: click **Install** in the GUI Configuration tab > Screenshot Engine (or run `playwright install chromium` when running from source). Media download works without it.
+
+## 🔗 t.me Link Download
+
+Send a Telegram message link (`https://t.me/<channel>/<id>` or `https://t.me/c/<id>/<id>`, owner only) and the bot reads it with the logged-in account, so channels that block forwarding ("restrict saving content") can still be backed up, as long as that account can see the message. `?single` downloads only that message; otherwise the whole album and media replies are included. Then choose the folder as usual.
 
 ## 🧾 Request Queue & Startup Scan
 

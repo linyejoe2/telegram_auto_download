@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.7.6) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v2.7.7) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -130,6 +130,7 @@ Main orchestration class that coordinates all bot operations:
 - `_download_and_monitor()`: Shared download and monitoring logic
 - `get_message_and_replies()`: Retrieves original message and replies using Telethon with enhanced error handling
 - `submit_flow()` / `enqueue_flow()` / `_queue_worker()`: Serial request queue of `FlowItem`s (v2.6.1); bot keeps accepting messages during downloads, waiting items show their queue position, each item gets its own folder selector (shown only after the previous download finishes, 30-minute timeout, `❌ 取消` skips); queue is in-memory
+- `_handle_tme_link()` / `parse_tme_link()`: owner-only `t.me/<user>/<id>` and `t.me/c/<id>/<id>` links (`?single` = that message only) are read via the Telethon user session (`get_message_and_replies`, album via `_collect_media_from_original`) and queued with `submit_flow`; works for chats with "restrict saving content" (v2.7.7)
 - `_startup_scan()` / `_present_scan_unit()`: On start, checks the user's last `STARTUP_SCAN_COUNT` own messages to the bot (Telethon) against the DB and queues undownloaded channel posts/albums and X/YouTube links (X account links not scanned) (v2.6.1)
 - `handle_rescan_command()` / `_scan_recent(limit, manual)`: owner-only `/rescan [count]` runs the startup scan again (registered in the command menu); `_scan_items` maps each scan unit key to its queued `FlowItem` so units still waiting are not queued twice; always reports the result in the chat (v2.7.6)
 - `run()`: Main bot startup and event loop management
