@@ -32,6 +32,7 @@ export const api = {
   deleteFolder: (path) => request('POST', '/api/folders/delete', { path }),
   renameVideo: (id, name) => request('POST', `/api/videos/${id}/rename`, { name }),
   move: (videos, folders, dest) => request('POST', '/api/move', { videos, folders, dest }),
+  ungroup: (id) => request('POST', `/api/videos/${id}/ungroup`),
 }
 
 // drag & drop payload between video items and folder tree nodes
@@ -48,6 +49,11 @@ export function getDragItems(e) {
   } catch {
     return null
   }
+}
+
+// higher = better: resolution (short side) first, then bit rate
+export function qualityKey(v) {
+  return Math.min(v.width || 0, v.height || 0) * 1e9 + (v.bit_rate || 0)
 }
 
 export const baseName = (path) => path.split('/').pop()

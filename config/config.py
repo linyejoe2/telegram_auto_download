@@ -54,7 +54,16 @@ def get_web_settings() -> dict:
         'port': port,
         'password_hash': os.getenv('WEB_PASSWORD_HASH', ''),
         'secret': os.getenv('WEB_SECRET', ''),
+        'similarity': similarity_threshold(),
     }
+
+
+def similarity_threshold(default: float = 70) -> float:
+    """Percent at which two videos of the same length count as versions of one video (SIMILARITY_THRESHOLD)."""
+    try:
+        return min(100.0, max(1.0, float(os.getenv('SIMILARITY_THRESHOLD', default))))
+    except ValueError:
+        return default
 
 # File and Directory Configuration
 def get_app_dir():

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, baseName, parentOf } from '../api.js'
+import { api, baseName, parentOf, qualityKey } from '../api.js'
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
 import { ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
@@ -240,7 +240,7 @@ export default function Library({ guard, onLogout }) {
   const shown = useMemo(() => {
     if (!videos) return []
     const needle = q.trim().toLowerCase()
-    return videos
+    const matching = videos
       .filter((v) => !actor || v.actors.includes(actor))
       .filter((v) => !series || v.series === series)
       .filter((v) => !folder || v.folder === folder || v.folder.startsWith(folder + '/'))
@@ -249,7 +249,17 @@ export default function Library({ guard, onLogout }) {
           !needle ||
           [v.title, v.file, v.folder, v.series, ...v.actors].some((s) => (s || '').toLowerCase().includes(needle)),
       )
-      .sort(SORTS[sort]?.fn || SORTS.added.fn)
+    // versions of the same video show once: the best quality one that passes the filters
+    const groupSize = {}
+    for (const v of videos) if (v.group) groupSize[v.group] = (groupSize[v.group] || 0) + 1
+    const best = {}
+    const items = []
+    for (const v of matching) {
+      if (!v.group) items.push(v)
+      else if (!best[v.group] || qualityKey(v) > qualityKey(best[v.group])) best[v.group] = v
+    }
+    for (const v of Object.values(best)) items.push({ ...v, versions: groupSize[v.group] })
+    return items.sort(SORTS[sort]?.fn || SORTS.added.fn)
   }, [videos, q, actor, series, folder, sort])
 
   const filtered = q || actor || series || folder

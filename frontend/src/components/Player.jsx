@@ -6,7 +6,7 @@ const QUALITIES = [480, 720, 1080]
 // Plays the original file when the browser can (native controls). Otherwise the server transcodes
 // live (ffmpeg -> fragmented MP4 from `offset` seconds), which can't be seeked by the browser itself,
 // so seeking restarts the stream at the new position and the controls show offset + currentTime.
-export default function Player({ video, startAt = 0 }) {
+export default function Player({ video, startAt = 0, onTime }) {
   const ref = useRef(null)
   const box = useRef(null)
   const duration = video.info?.duration || video.duration || 0
@@ -72,7 +72,10 @@ export default function Player({ video, startAt = 0 }) {
     onWaiting: () => setWaiting(true),
     onPlaying: () => setWaiting(false),
     onCanPlay: () => setWaiting(false),
-    onTimeUpdate: () => dragging === null && setTime(now()),
+    onTimeUpdate: () => {
+      onTime?.(now())
+      if (dragging === null) setTime(now())
+    },
     onLoadedMetadata: () => {
       if (mode === 'direct' && startAt && ref.current.currentTime < 1) ref.current.currentTime = startAt
     },

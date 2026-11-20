@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.0.2"
+        self.version = "v3.1.0"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -243,8 +243,15 @@ class TelegramBotGUI:
             foreground="green" if settings['password_hash'] else "red")
         self.web_password_label.grid(row=3, column=1, sticky=tk.W, padx=5)
 
+        ttk.Label(settings_frame, text="Same-video similarity:").grid(row=4, column=0, sticky=tk.W, pady=2)
+        similar_row = ttk.Frame(settings_frame)
+        similar_row.grid(row=4, column=1, sticky=tk.W, padx=5)
+        self.similarity_var = tk.StringVar(value=f"{settings['similarity']:g}")
+        ttk.Entry(similar_row, textvariable=self.similarity_var, width=6).pack(side=tk.LEFT)
+        ttk.Label(similar_row, text="%  videos of the same length (±3 s) at least this similar are grouped as versions").pack(side=tk.LEFT, padx=6)
+
         ttk.Button(settings_frame, text="Save Web Settings", command=self.save_web_settings_clicked).grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=10)
+            row=5, column=0, columnspan=2, sticky=tk.W, pady=10)
 
         notes = ttk.LabelFrame(parent, text="Notes", padding="10")
         notes.pack(fill=tk.X, padx=10, pady=5)
@@ -278,6 +285,18 @@ class TelegramBotGUI:
         if not port.isdigit() or not 1 <= int(port) <= 65535:
             messagebox.showerror("Error", "Port must be a number between 1 and 65535")
             return False
+        similar = self.similarity_var.get().strip()
+        try:
+            similar_value = float(similar)
+            if not 1 <= similar_value <= 100:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Error", "Similarity must be a number between 1 and 100 (%)")
+            return False
+        set_key('.env', 'SIMILARITY_THRESHOLD', f"{similar_value:g}")
+        os.environ['SIMILARITY_THRESHOLD'] = f"{similar_value:g}"
+        if self.web_server:
+            self.web_server.library.threshold = similar_value
         set_key('.env', 'WEB_PORT', port)
         set_key('.env', 'WEB_HOST', self.web_host_var.get())
         set_key('.env', 'WEB_ENABLED', '1' if self.web_enabled_var.get() else '0')
@@ -331,7 +350,8 @@ class TelegramBotGUI:
             from library.server import LibraryServer
             server = LibraryServer(
                 lambda: os.getenv('DOWNLOADS_PATH') or bot_config.DOWNLOADS_DIR,
-                settings['password_hash'], settings['secret'], port=settings['port'], host=settings['host'])
+                settings['password_hash'], settings['secret'], port=settings['port'], host=settings['host'],
+                similarity_threshold=settings['similarity'], on_grouped=self._notify_owner)
             server.start_in_thread()
         except Exception as e:
             logging.error(f"Web library failed to start: {e}")
@@ -343,6 +363,12 @@ class TelegramBotGUI:
         self.web_start_button.config(state=tk.DISABLED)
         self.web_stop_button.config(state=tk.NORMAL)
         self.web_urls_label.config(text="Open: " + "   ".join(self._web_urls()))
+
+    def _notify_owner(self, text):
+        """Send a message to the bot owner if the bot is running (called from library threads)."""
+        bot, loop = getattr(self, 'bot', None), self.bot_loop
+        if bot and loop and self.bot_running:
+            bot.notify_owner_threadsafe(loop, text)
 
     def stop_web(self):
         if self.web_server:
@@ -723,6 +749,7 @@ class TelegramBotGUI:
             bot = TelegramMediaBot(
                 bot_config.API_ID, bot_config.API_HASH, bot_config.PHONE_NUMBER, bot_config.BOT_TOKEN
             )
+            self.bot = bot
             self.bot_task = loop.create_task(bot.run())
             loop.run_until_complete(self.bot_task)
         except asyncio.CancelledError:

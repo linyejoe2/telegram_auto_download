@@ -41,17 +41,21 @@ async def main():
         validate_config()
         print("✅ Configuration validated successfully")
         
+        bot = TelegramMediaBot(API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN)
+
         # Web video library (WEB_ENABLED=1 and a password set in the GUI)
         web = get_web_settings()
         if web['enabled'] and web['password_hash'] and web['secret']:
             from library.server import LibraryServer
+            loop = asyncio.get_running_loop()
             library = LibraryServer(lambda: os.getenv('DOWNLOADS_PATH') or DOWNLOADS_DIR, web['password_hash'],
-                                    web['secret'], port=web['port'], host=web['host'])
+                                    web['secret'], port=web['port'], host=web['host'],
+                                    similarity_threshold=web['similarity'],
+                                    on_grouped=lambda text: bot.notify_owner_threadsafe(loop, text))
             await library.start()
             print(f"🎬 Web library: http://localhost:{web['port']}")
 
-        # Create and run the bot
-        bot = TelegramMediaBot(API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN)
+        # Run the bot
         await bot.run()
         
     except ValueError as e:

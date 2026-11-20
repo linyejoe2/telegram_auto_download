@@ -1,5 +1,14 @@
 # ChangeLog
 
+## [3.1.0] - 2026-11-20 - Similar Video Versions
+### Added
+- Similar-video detection (`library/similarity.py`): videos whose lengths differ by at most 3 s are compared on screenshots 1, 5 and 9 (10 / 50 / 90 %) with grayscale SSIM (skimage-identical, OpenCV only); mean >= threshold (default 70 %, GUI "Same-video similarity", `SIMILARITY_THRESHOLD`) groups them as versions of one video
+- Decoded grayscale frames (320x180) are cached as `sig.npy` in the hidden shots folder and in memory, so comparisons need no image decoding
+- Full check of the whole library when the web library starts (`Library.check_all`); afterwards every new video is matched when its screenshots are ready (`_match_new`) and the bot sends a Telegram notice (`notify_owner_threadsafe`)
+- Web: a group shows once (best quality) with a "N 個版本" badge; video page 版本 box switches 線路 and keeps the playback time; 「從群組移出」 splits a file out and the pair is never grouped again (`/api/videos/{id}/ungroup`, `not_same`)
+### Changed
+- 標題 / 主演 / 系列 are shared within a group (tags merged when grouping); sidecar meta gains `uid`, `group`, `not_same`
+
 ## [3.0.2] - 2026-11-20 - Quality Sort & Partial Download Fix
 ### Added
 - Library list view shows bit rate under the resolution; new 畫質 sort (resolution, then bit rate) in the sort menu and on the list column header

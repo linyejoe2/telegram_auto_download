@@ -12,10 +12,11 @@ import os
 import shutil
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, List, Optional
 
-from . import media
+from . import media, similarity
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,11 @@ class Library:
         self._pending = set()                    # ids with a background job queued / running
         self.last_scan = 0.0
         self.deferred = 0                        # videos skipped by the last scan because they're still changing
+        # versions (same video in another quality / with a watermark), see library/similarity.py
+        self.threshold = similarity.DEFAULT_THRESHOLD   # percent
+        self.on_grouped: Optional[Callable[[str], None]] = None   # e.g. a Telegram notice
+        self.matching_ready = False              # set after the full check at startup
+        self._sigs: Dict[str, tuple] = {}        # path -> (shots_mtime, signature)
 
     # ── paths ──
 
@@ -179,6 +185,8 @@ class Library:
                     current['source'] = source
                 media.save_meta(path, current)
                 entry['error'] = None
+            if self.matching_ready:
+                self._match_new(vid)
         except Exception as e:
             logger.warning(f"影片資訊/截圖產生失敗 {vid}: {e}")
             with self._lock:
@@ -229,6 +237,7 @@ class Library:
             'cover': f"/media/{vid}/shots/{meta['shots'][0]}" if meta.get('shots') else None,
             'ready': bool(meta.get('info') and meta.get('shots')),
             'error': entry.get('error'),
+            'group': meta.get('group') or '',
         }
 
     def detail(self, vid: str) -> Optional[dict]:
@@ -247,8 +256,22 @@ class Library:
                 'mime': media.mime_codecs(entry['path'], info),
                 'processing': vid in self._pending,
                 'error': entry.get('error'),
+                'versions': self._versions(vid, entry),
             })
             return data
+
+    def _versions(self, vid: str, entry: dict) -> List[dict]:
+        """All files of this video's group (best quality first), for the line switcher."""
+        gid = entry['meta'].get('group')
+        members = self._group_members(gid) if gid else [(vid, entry)]
+        out = []
+        for mid, m in sorted(members, key=lambda x: self._quality(x[1]), reverse=True):
+            info = m['meta'].get('info') or {}
+            out.append({'id': mid, 'file': os.path.basename(m['rel']), 'folder': os.path.dirname(m['rel']),
+                        'width': info.get('width'), 'height': info.get('height'), 'bit_rate': info.get('bit_rate'),
+                        'size': info.get('size') or self._size(m['path']), 'duration': info.get('duration'),
+                        'video_codec': info.get('video_codec')})
+        return out
 
     @staticmethod
     def _size(path: str) -> int:
@@ -290,6 +313,11 @@ class Library:
             if 'source' in fields:
                 meta['source'] = str(fields['source'] or '').strip()[:2000]
             media.save_meta(entry['path'], meta)
+            if meta.get('group'):                # title / actors / series are shared by all versions
+                for mid, m in self._group_members(meta['group']):
+                    if mid != vid:
+                        m['meta'].update({k: meta[k] for k in ('title', 'actors', 'series')})
+                        media.save_meta(m['path'], m['meta'])
         return self.detail(vid)
 
     def delete(self, vid: str) -> bool:
@@ -305,8 +333,157 @@ class Library:
             except (ImportError, OSError):
                 pass
             del self.entries[vid]
+            self._dissolve_if_single(entry['meta'].get('group'))
         logger.info(f"影片庫：已刪除 {entry['path']}")
         return True
+
+    # ── versions: grouping the same video (other quality / watermark) ──
+
+    @staticmethod
+    def _quality(entry: dict) -> tuple:
+        info = entry['meta'].get('info') or {}
+        return (min(info.get('width') or 0, info.get('height') or 0), info.get('bit_rate') or 0)
+
+    def _group_members(self, gid: str) -> List[tuple]:
+        return [(vid, e) for vid, e in self.entries.items() if gid and e['meta'].get('group') == gid]
+
+    def _dissolve_if_single(self, gid: str):
+        """A group with one file left is no group any more."""
+        members = self._group_members(gid) if gid else []
+        if len(members) == 1:
+            vid, e = members[0]
+            e['meta']['group'] = ''
+            media.save_meta(e['path'], e['meta'])
+
+    def _signature(self, entry: dict):
+        meta = entry['meta']
+        if not meta.get('shots') or not meta.get('info'):
+            return None
+        cached = self._sigs.get(entry['path'])
+        if cached and cached[0] == meta.get('shots_mtime'):
+            return cached[1]
+        try:
+            sig = similarity.load_signature(entry['path'], meta['shots'])
+        except Exception as e:
+            logger.debug(f"相似度特徵讀取失敗 {entry['path']}: {e}")
+            sig = None
+        if sig is not None:
+            self._sigs[entry['path']] = (meta.get('shots_mtime'), sig)
+        return sig
+
+    @staticmethod
+    def _excluded(a: dict, b: dict) -> bool:
+        return b['meta'].get('uid') in (a['meta'].get('not_same') or []) or \
+            a['meta'].get('uid') in (b['meta'].get('not_same') or [])
+
+    def _comparable(self, a: dict, b: dict) -> bool:
+        da = (a['meta'].get('info') or {}).get('duration') or 0
+        db = (b['meta'].get('info') or {}).get('duration') or 0
+        same_group = a['meta'].get('group') and a['meta'].get('group') == b['meta'].get('group')
+        return (da > 0 and db > 0 and abs(da - db) <= similarity.DURATION_TOLERANCE
+                and not same_group and not self._excluded(a, b))
+
+    def _score(self, a: dict, b: dict):
+        sa, sb = self._signature(a), self._signature(b)
+        if sa is None or sb is None:
+            return None
+        return similarity.similarity(sa, sb)
+
+    def _join(self, vids: List[str]):
+        """Put these videos (and their current groups) into one group with shared title / actors / series."""
+        with self._lock:
+            members = {}
+            gids = [self.entries[v]['meta'].get('group') for v in vids if v in self.entries]
+            for v in vids:
+                if v in self.entries:
+                    members[v] = self.entries[v]
+            for gid in filter(None, gids):
+                members.update(dict(self._group_members(gid)))
+            if len(members) < 2:
+                return
+            gid = next(filter(None, gids), None) or 'g' + uuid.uuid4().hex[:12]
+            ordered = sorted(members.values(), key=self._quality, reverse=True)
+            # an edited title wins over a default one (= the file name)
+            edited = [e for e in ordered
+                      if e['meta'].get('title') and e['meta']['title'] != os.path.splitext(os.path.basename(e['path']))[0]]
+            title = (edited or ordered)[0]['meta'].get('title')
+            actors = media.clean_tags([a for e in ordered for a in e['meta'].get('actors') or []])
+            series = next((e['meta']['series'] for e in ordered if e['meta'].get('series')), '')
+            for e in members.values():
+                e['meta'].update({'group': gid, 'title': title, 'actors': actors, 'series': series})
+                media.save_meta(e['path'], e['meta'])
+
+    def _match_new(self, vid: str):
+        """A video just got its info / screenshots: group it with a matching version, if any."""
+        with self._lock:
+            entry = self.entries.get(vid)
+            if not entry:
+                return
+            candidates = [(oid, o) for oid, o in self.entries.items() if oid != vid and self._comparable(entry, o)]
+        best = None
+        for oid, other in candidates:
+            score = self._score(entry, other)
+            if score is not None and score >= self.threshold and (best is None or score > best[1]):
+                best = (oid, score)
+        if not best:
+            return
+        self._join([vid, best[0]])
+        with self._lock:
+            title = entry['meta'].get('title')
+            other = self.entries.get(best[0])
+            count = len(self._group_members(entry['meta'].get('group')))
+            other_file = os.path.basename(other['rel']) if other else ''
+        logger.info(f"影片庫：{entry['rel']} 與 {other_file} 相似度 {best[1]:.0f}%，歸類為同一部片")
+        if self.on_grouped:
+            try:
+                self.on_grouped(f"🔁 新影片「{os.path.basename(entry['rel'])}」與「{other_file}」相似度 {best[1]:.0f}%，"
+                                f"已歸類為同一部片「{title}」（{count} 個版本，可在網頁影片庫切換）")
+            except Exception as e:
+                logger.warning(f"相似影片通知失敗: {e}")
+
+    def check_all(self) -> int:
+        """Full check (at startup): compare every pair of videos with lengths within ±3 s."""
+        with self._lock:
+            ready = [(vid, e) for vid, e in self.entries.items()
+                     if (e['meta'].get('info') or {}).get('duration') and e['meta'].get('shots')]
+        ready.sort(key=lambda x: x[1]['meta']['info']['duration'])
+        pairs = 0
+        for i, (vid, a) in enumerate(ready):
+            da = a['meta']['info']['duration']
+            for oid, b in ready[i + 1:]:
+                if b['meta']['info']['duration'] - da > similarity.DURATION_TOLERANCE:
+                    break
+                if not self._comparable(a, b):
+                    continue
+                score = self._score(a, b)
+                pairs += 1
+                if score is not None and score >= self.threshold:
+                    logger.info(f"影片庫：{a['rel']} 與 {b['rel']} 相似度 {score:.0f}%，歸類為同一部片")
+                    self._join([vid, oid])
+        self.matching_ready = True
+        logger.info(f"影片庫：相似影片全面檢查完成（比對 {pairs} 組）")
+        return pairs
+
+    def ungroup(self, vid: str) -> Optional[dict]:
+        """Split this file out of its group; it will never be grouped with those files again."""
+        with self._lock:
+            entry = self.entries.get(vid)
+            if not entry:
+                return None
+            gid = entry['meta'].get('group')
+            if not gid:
+                return self.detail(vid)
+            for oid, other in self._group_members(gid):
+                if oid == vid:
+                    continue
+                entry['meta'].setdefault('not_same', []).append(other['meta']['uid'])
+                other['meta'].setdefault('not_same', []).append(entry['meta']['uid'])
+                media.save_meta(other['path'], other['meta'])
+            entry['meta']['group'] = ''
+            media.save_meta(entry['path'], entry['meta'])
+            self._dissolve_if_single(gid)
+        logger.info(f"影片庫：{entry['rel']} 已從版本群組移出")
+        return self.detail(vid)
 
     # ── folders & file management ──
 

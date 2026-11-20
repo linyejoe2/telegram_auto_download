@@ -119,6 +119,7 @@ hiddenimports = [
     'library.store',
     'library.media',
     'library.auth',
+    'library.similarity',
     'src.video_loader',
 
     # custom

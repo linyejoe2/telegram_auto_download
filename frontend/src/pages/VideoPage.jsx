@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { api, fmtBitrate, fmtDuration, fmtSize } from '../api.js'
+import { api, fmtBitrate, fmtDuration, fmtSize, resolutionLabel } from '../api.js'
 import Player from '../components/Player.jsx'
 import TagInput from '../components/TagInput.jsx'
 
@@ -28,6 +28,7 @@ export default function VideoPage({ guard }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [playFrom, setPlayFrom] = useState(null) // null = show screenshots, number = playing from there
+  const playTime = useRef(0) // where the player is, so switching version continues there
 
   async function load() {
     try {
@@ -46,7 +47,8 @@ export default function VideoPage({ guard }) {
 
   useEffect(() => {
     setForm(null)
-    setPlayFrom(null)
+    // switching version keeps playing at the same time
+    setPlayFrom(location.state?.resume ?? null)
     load()
     api.tags().then(setTags).catch(() => {})
   }, [id])
@@ -85,6 +87,25 @@ export default function VideoPage({ guard }) {
     }
   }
 
+  function switchVersion(versionId) {
+    if (versionId === id) return
+    navigate(`/v/${versionId}`, {
+      replace: true,
+      state: { back: location.state?.back, resume: playFrom !== null ? playTime.current : null },
+    })
+  }
+
+  async function splitOut() {
+    if (!window.confirm(`把「${video.file}」從這個版本群組移出？\n之後自動比對不會再把它和這些影片歸類在一起。`)) return
+    try {
+      const v = await api.ungroup(id)
+      setVideo(v)
+      setForm({ title: v.title, actors: v.actors, series: v.series, source: v.source })
+    } catch (err) {
+      guard(err)
+    }
+  }
+
   async function remove() {
     if (!window.confirm(`確定要刪除「${video.file}」嗎？\n影片檔與它的資訊、截圖都會刪除，無法復原。`)) return
     try {
@@ -117,7 +138,7 @@ export default function VideoPage({ guard }) {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section className="space-y-4">
           {playFrom !== null ? (
-            <Player key={playFrom} video={video} startAt={playFrom} />
+            <Player key={`${id}-${playFrom}`} video={video} startAt={playFrom} onTime={(t) => (playTime.current = t)} />
           ) : (
             <>
               <button
@@ -142,6 +163,34 @@ export default function VideoPage({ guard }) {
                 <p className="text-sm text-neutral-500">{video.error ? `無法產生截圖：${video.error}` : '截圖產生中…'}</p>
               )}
             </>
+          )}
+          {video.versions?.length > 1 && (
+            <section className="rounded-xl bg-neutral-900 p-3 ring-1 ring-white/5">
+              <div className="mb-2 flex items-center gap-2">
+                <h2 className="text-sm font-medium">版本（{video.versions.length}）</h2>
+                <span className="text-xs text-neutral-500">同一部片的不同畫質 / 檔案，切換時從目前時間繼續播放</span>
+                <button onClick={splitOut} className="ml-auto rounded-lg bg-neutral-800 px-2.5 py-1 text-xs hover:bg-neutral-700" title="這個檔案不是同一部片">
+                  從群組移出
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {video.versions.map((v, i) => (
+                  <button
+                    key={v.id}
+                    onClick={() => switchVersion(v.id)}
+                    title={`${v.folder ? v.folder + '/' : ''}${v.file}`}
+                    className={`rounded-lg px-3 py-1.5 text-left text-sm ring-1 ${
+                      v.id === id ? 'bg-accent/25 ring-accent' : 'bg-neutral-800 ring-white/10 hover:bg-neutral-700'
+                    }`}
+                  >
+                    <span className="font-medium">線路 {i + 1}</span>
+                    <span className="ml-2 text-neutral-300">
+                      {[resolutionLabel(v.width, v.height), fmtBitrate(v.bit_rate), v.video_codec, fmtSize(v.size)].filter(Boolean).join(' · ')}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
         </section>
 

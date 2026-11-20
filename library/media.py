@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,9 @@ def default_meta(video: str) -> dict:
         'info_mtime': 0,        # video mtime the info / shots were made for
         'shots': [],
         'shots_mtime': 0,
+        'uid': uuid.uuid4().hex,   # stable identity (moves / renames keep the sidecar)
+        'group': '',               # versions of the same video share a group id
+        'not_same': [],            # uids the user split off: never group with them again
     }
 
 

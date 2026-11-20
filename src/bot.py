@@ -1173,6 +1173,11 @@ class TelegramMediaBot:
         self.rescan_task = asyncio.create_task(self._scan_recent(limit, manual=True))
 
     # ---------------------- utilities ----------------------
+    def notify_owner_threadsafe(self, loop, text: str):
+        """Send `text` to the owner from another thread (e.g. the web library's similar-video notice)."""
+        if self.owner_id and loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.app.bot.send_message(chat_id=self.owner_id, text=text), loop)
+
     def get_download_statistics(self):
         return self.downloader.get_download_statistics()
 

@@ -56,10 +56,14 @@ def _is_https(request: web.Request) -> bool:
 
 class LibraryServer:
     def __init__(self, base_path: Callable[[], str], password_hash: str, secret: str,
-                 port: int = 8765, host: str = '0.0.0.0'):
+                 port: int = 8765, host: str = '0.0.0.0', similarity_threshold: Optional[float] = None,
+                 on_grouped: Optional[Callable[[str], None]] = None):
         if not password_hash:
             raise ValueError('尚未設定網頁影片庫密碼')
         self.library = Library(base_path)
+        if similarity_threshold:
+            self.library.threshold = similarity_threshold
+        self.library.on_grouped = on_grouped
         self.sessions = Sessions(secret, password_hash)
         self.password_hash = password_hash
         self.port, self.host = port, host
@@ -88,6 +92,7 @@ class LibraryServer:
         r.add_post('/api/folders/rename', self.rename_folder)
         r.add_post('/api/folders/delete', self.delete_folder)
         r.add_post('/api/videos/{id}/rename', self.rename_video)
+        r.add_post('/api/videos/{id}/ungroup', self.ungroup_video)
         r.add_post('/api/move', self.move)
         r.add_post('/api/rescan', self.rescan)
         r.add_get('/media/{id}/file', self.media_file)
@@ -232,6 +237,12 @@ class LibraryServer:
         vid, error = await self._run(self.library.rename_video, request.match_info['id'], body.get('name', ''))
         return error or web.json_response({'id': vid})
 
+    async def ungroup_video(self, request: web.Request):
+        data, error = await self._run(self.library.ungroup, request.match_info['id'])
+        if error:
+            return error
+        return web.json_response(data) if data else web.json_response({'error': 'not found'}, status=404)
+
     async def move(self, request: web.Request):
         body = await self._body(request)
         videos = [str(v) for v in body.get('videos') or [] if isinstance(v, str)]
@@ -329,6 +340,12 @@ class LibraryServer:
         while True:
             try:
                 await loop.run_in_executor(None, self.library.scan)
+                if not self.library.matching_ready:
+                    # full similarity check once everything has its screenshots; new videos are
+                    # matched one by one afterwards (and announced through on_grouped)
+                    while self.library.processing:
+                        await asyncio.sleep(2)
+                    await loop.run_in_executor(None, self.library.check_all)
             except Exception as e:
                 logger.warning(f"影片庫掃描失敗: {e}")
             # come back soon for files that were still being written

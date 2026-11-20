@@ -31,6 +31,9 @@ export default function VideoCard({ video, search, onMenu }) {
           </div>
         )}
         {res && <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium">{res}</span>}
+        {video.versions > 1 && (
+          <span className="absolute right-2 top-2 rounded bg-accent/90 px-1.5 py-0.5 text-[11px] font-medium">{video.versions} 個版本</span>
+        )}
         {video.duration != null && (
           <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums">
             {fmtDuration(video.duration)}
@@ -58,7 +61,10 @@ export function VideoRow({ video, search, onMenu }) {
         {video.cover && <img src={video.cover} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
       </div>
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium" title={video.title}>{video.title}</p>
+        <p className="truncate text-sm font-medium" title={video.title}>
+          {video.title}
+          {video.versions > 1 && <span className="ml-2 rounded bg-accent/30 px-1.5 py-0.5 text-[11px] font-normal">{video.versions} 個版本</span>}
+        </p>
         <p className="truncate text-xs text-neutral-500" title={`${video.folder}/${video.file}`}>
           {video.folder ? `${video.folder}/` : ''}{video.file}
         </p>
