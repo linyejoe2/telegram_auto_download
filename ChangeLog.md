@@ -1,5 +1,17 @@
 # ChangeLog
 
+## [3.0.0] - 2026-11-20 - Web Video Library
+### Added
+- Web video library for watching and managing downloaded videos in a browser (Telegram and system settings stay in the Windows app): `library/` backend (aiohttp `LibraryServer` in `server.py`, `Library` scanner with 2 background workers in `store.py`, ffprobe info and 9 ffmpeg screenshots in `media.py`) and `frontend/` (React 18 + Vite 6 + Tailwind CSS 4; `npm run build` outputs to the gitignored `library/static`)
+- Pages: Login; library grid (cover, resolution/duration badges, search, filter by 主演/系列/資料夾, sort, rescan); video page (3x3 screenshot grid, edit title/actors/series/source, Video Info panel, download original, regenerate screenshots, delete with confirm)
+- Player plays the original file when the browser supports the codec, otherwise (or on failure) a live ffmpeg transcode to fragmented H.264/AAC MP4 with custom controls (seek, ±10s, volume, 480/720/1080p, fullscreen, Space/←/→/F); Safari/iOS cannot play the live transcode (no range support)
+- Metadata is kept beside each video as hidden `.<file>.meta.json` and `.<file>.shots/01-09.jpg`; the source is auto-filled from the bot database (`find_download`/`source_link`); deleting from the web also removes the sidecars and the hidden `.720p_h265` copy
+- Windows app "Web Library" tab (`src/ui.py` `setup_web_tab`): Start/Stop/Open in Browser, Start on launch (`WEB_ENABLED`), Port (`WEB_PORT`, default 8765), Access any location / this PC only (`WEB_HOST`), new password; CLI `main.py --cli` also starts the library when `WEB_ENABLED=1` (`config.get_web_settings()`)
+### Changed
+- `package_windows.bat` step 5 runs `npm ci && npm run build` in `frontend/` (needs Node.js 18+, build fails without it); `telegram_bot.spec` bundles `library/static`, aiohttp and the library modules; `aiohttp` added to `requirements.txt`; ffmpeg/ffprobe must be in PATH or `FFMPEG_PATH`
+### Security
+- Password stored only as a PBKDF2 hash (`WEB_PASSWORD_HASH`); HMAC-signed session cookie (`WEB_SECRET`), changing the password logs out all sessions; 5 wrong passwords lock the client for 15 minutes; security headers and all paths confined to the downloads folder
+
 ## [2.7.7] - 2026-11-20 - t.me Link Download
 ### Added
 - Owner-only `t.me/<channel>/<id>` and `t.me/c/<id>/<id>` link download (`bot.py` `parse_tme_link`, `_handle_tme_link`): media is read through the logged-in Telethon account, so "restrict saving content" chats work; `?single` downloads only that message, otherwise the whole album and media replies, then the usual folder selector

@@ -245,3 +245,10 @@ py-env/
 # Keep in repo: *.bat, *.py, *.spec, *.iss, *.md, requirements*.txt
 # Ignore: build/, dist/, installer_output/, build_env/, assets/, *.exe, *.ico
 # This allows source files to be tracked while ignoring generated artifacts
+
+# Web library: frontend dependencies and build output (built by package_windows.bat / npm run build)
+frontend/node_modules/
+library/static/
+
+# Separate reference repo (its own .git), not part of this project
+example/

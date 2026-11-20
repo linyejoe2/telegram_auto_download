@@ -113,11 +113,21 @@ hiddenimports = [
     'pyaes',
     'cryptg',  # native AES for Telethon: faster uploads/downloads
 
+    # web video library (aiohttp server + React build in library/static)
+    'library',
+    'library.server',
+    'library.store',
+    'library.media',
+    'library.auth',
+    'src.video_loader',
+
     # custom
     'imagehash',
     'PIL',
     'numpy',
 ]
+
+hiddenimports += collect_submodules('aiohttp')
 
 # X profile downloader (extractors are loaded dynamically)
 hiddenimports += collect_submodules('gallery_dl')
@@ -127,6 +137,9 @@ hiddenimports += collect_submodules('playwright')
 datas = [
     # Include config directory
     (os.path.join(project_root, 'config'), 'config'),
+
+    # Web library frontend (built by package_windows.bat: npm run build in frontend/)
+    (os.path.join(project_root, 'library', 'static'), os.path.join('library', 'static')),
     
     # Include any template or resource files
     # (os.path.join(project_root, 'resources'), 'resources'),  # If you have resources

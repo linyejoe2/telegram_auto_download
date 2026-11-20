@@ -42,6 +42,20 @@ def get_startup_scan_count(default: int = 30) -> int:
     except (TypeError, ValueError):
         return default
 
+def get_web_settings() -> dict:
+    """Web video library settings (WEB_* in .env); the password is stored only as a hash."""
+    try:
+        port = int(os.getenv('WEB_PORT', '8765'))
+    except ValueError:
+        port = 8765
+    return {
+        'enabled': os.getenv('WEB_ENABLED', '0') == '1',
+        'host': os.getenv('WEB_HOST', '0.0.0.0'),
+        'port': port,
+        'password_hash': os.getenv('WEB_PASSWORD_HASH', ''),
+        'secret': os.getenv('WEB_SECRET', ''),
+    }
+
 # File and Directory Configuration
 def get_app_dir():
     """Get the application directory that works for both development and packaged app"""

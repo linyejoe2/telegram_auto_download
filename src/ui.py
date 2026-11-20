@@ -21,11 +21,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .bot import log_queue, TelegramMediaBot
 import config.config as bot_config
 from .database import DatabaseManager
-from config.config import validate_config
+from config.config import validate_config, get_web_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v2.7.7"
+        self.version = "v3.0.0"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -54,6 +54,9 @@ class TelegramBotGUI:
         # Auto-start preference
         self.auto_start_var = tk.BooleanVar(value=True)
         
+        # Web video library (library/server.py), runs in its own thread
+        self.web_server = None
+
         # System tray
         self.tray_icon = None
         self.is_minimized_to_tray = False
@@ -74,6 +77,7 @@ class TelegramBotGUI:
         
         # Auto-start bot if configuration is valid
         self.auto_start_bot()
+        self.root.after(1500, self.auto_start_web)
 
     def setup_gui(self):
         """Setup the main GUI interface"""
@@ -95,6 +99,11 @@ class TelegramBotGUI:
         database_frame = ttk.Frame(notebook)
         notebook.add(database_frame, text="Database")
         self.setup_database_tab(database_frame)
+
+        # Web video library tab
+        web_frame = ttk.Frame(notebook)
+        notebook.add(web_frame, text="Web Library")
+        self.setup_web_tab(web_frame)
 
     def setup_config_tab(self, parent):
         """Setup configuration tab with bot control at top"""
@@ -188,6 +197,165 @@ class TelegramBotGUI:
         self.chromium_check_button.pack(side=tk.RIGHT, padx=5)
         self.chromium_install_button = ttk.Button(chromium_frame, text="Install", command=self.install_chromium)
         self.chromium_install_button.pack(side=tk.RIGHT, padx=5)
+
+    # ---------------------- web video library ----------------------
+    def setup_web_tab(self, parent):
+        """Web video library: watch & manage downloaded videos in a browser (password protected)"""
+        settings = get_web_settings()
+
+        control = ttk.LabelFrame(parent, text="Web Library Server", padding="10")
+        control.pack(fill=tk.X, padx=10, pady=5)
+        status_row = ttk.Frame(control)
+        status_row.pack(fill=tk.X, pady=5)
+        ttk.Label(status_row, text="Status:").pack(side=tk.LEFT)
+        self.web_status_label = ttk.Label(status_row, text="Stopped", foreground="red")
+        self.web_status_label.pack(side=tk.LEFT, padx=10)
+
+        buttons = ttk.Frame(control)
+        buttons.pack(fill=tk.X, pady=5)
+        self.web_start_button = ttk.Button(buttons, text="Start", command=self.start_web)
+        self.web_start_button.pack(side=tk.LEFT, padx=5)
+        self.web_stop_button = ttk.Button(buttons, text="Stop", command=self.stop_web, state=tk.DISABLED)
+        self.web_stop_button.pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons, text="Open in Browser", command=self.open_web).pack(side=tk.LEFT, padx=5)
+        self.web_enabled_var = tk.BooleanVar(value=settings['enabled'])
+        ttk.Checkbutton(buttons, text="Start on launch", variable=self.web_enabled_var,
+                        command=self.save_web_settings).pack(side=tk.LEFT, padx=20)
+
+        settings_frame = ttk.LabelFrame(parent, text="Settings", padding="10")
+        settings_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(settings_frame, text="Port:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.web_port_var = tk.StringVar(value=str(settings['port']))
+        ttk.Entry(settings_frame, textvariable=self.web_port_var, width=8).grid(row=0, column=1, sticky=tk.W, padx=5)
+
+        ttk.Label(settings_frame, text="Access:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.web_host_var = tk.StringVar(value=settings['host'])
+        access = ttk.Frame(settings_frame)
+        access.grid(row=1, column=1, sticky=tk.W, padx=5)
+        ttk.Radiobutton(access, text="Any location (0.0.0.0)", value="0.0.0.0", variable=self.web_host_var).pack(side=tk.LEFT)
+        ttk.Radiobutton(access, text="This PC only", value="127.0.0.1", variable=self.web_host_var).pack(side=tk.LEFT, padx=10)
+
+        ttk.Label(settings_frame, text="New password:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.web_password_var = tk.StringVar()
+        ttk.Entry(settings_frame, textvariable=self.web_password_var, width=30, show="*").grid(row=2, column=1, sticky=tk.W, padx=5)
+        self.web_password_label = ttk.Label(
+            settings_frame, text="Password: set" if settings['password_hash'] else "Password: not set (required)",
+            foreground="green" if settings['password_hash'] else "red")
+        self.web_password_label.grid(row=3, column=1, sticky=tk.W, padx=5)
+
+        ttk.Button(settings_frame, text="Save Web Settings", command=self.save_web_settings_clicked).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=10)
+
+        notes = ttk.LabelFrame(parent, text="Notes", padding="10")
+        notes.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(notes, justify=tk.LEFT, wraplength=720, text=(
+            "• Shows every video in the downloads folder: player, screenshots, actors / series / source, video info.\n"
+            "• Info and screenshots are stored next to each video as hidden files (.<name>.meta.json, .<name>.shots).\n"
+            "• Needs ffmpeg / ffprobe in PATH (or FFMPEG_PATH). Videos the browser can't play are transcoded live.\n"
+            "• From outside your network: forward the port on your router, or better use an HTTPS tunnel "
+            "(e.g. Cloudflare Tunnel / Tailscale), so the password isn't sent unencrypted. Use a strong password.\n"
+            "• Telegram and system settings stay in this Windows app.")).pack(anchor=tk.W)
+        self.web_urls_label = ttk.Label(notes, text="", foreground="blue")
+        self.web_urls_label.pack(anchor=tk.W, pady=(8, 0))
+
+    def _web_urls(self):
+        port = self.web_port_var.get().strip() or '8765'
+        urls = [f"http://localhost:{port}"]
+        if self.web_host_var.get() == '0.0.0.0':
+            try:
+                import socket
+                for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                    ip = info[4][0]
+                    if not ip.startswith('127.') and f"http://{ip}:{port}" not in urls:
+                        urls.append(f"http://{ip}:{port}")
+            except Exception:
+                pass
+        return urls
+
+    def save_web_settings(self):
+        """Persist port / access / start-on-launch to .env (returns False if invalid)"""
+        port = self.web_port_var.get().strip()
+        if not port.isdigit() or not 1 <= int(port) <= 65535:
+            messagebox.showerror("Error", "Port must be a number between 1 and 65535")
+            return False
+        set_key('.env', 'WEB_PORT', port)
+        set_key('.env', 'WEB_HOST', self.web_host_var.get())
+        set_key('.env', 'WEB_ENABLED', '1' if self.web_enabled_var.get() else '0')
+        os.environ.update({'WEB_PORT': port, 'WEB_HOST': self.web_host_var.get(),
+                           'WEB_ENABLED': '1' if self.web_enabled_var.get() else '0'})
+        return True
+
+    def save_web_settings_clicked(self):
+        if not self.save_web_settings():
+            return
+        password = self.web_password_var.get()
+        if password:
+            if len(password) < 8:
+                messagebox.showerror("Error", "Use a password of at least 8 characters (the library can be reached from the internet)")
+                return
+            from library.auth import hash_password, new_secret
+            password_hash = hash_password(password)
+            set_key('.env', 'WEB_PASSWORD_HASH', password_hash)
+            os.environ['WEB_PASSWORD_HASH'] = password_hash
+            if not os.getenv('WEB_SECRET'):
+                secret = new_secret()
+                set_key('.env', 'WEB_SECRET', secret)
+                os.environ['WEB_SECRET'] = secret
+            self.web_password_var.set('')
+            self.web_password_label.config(text="Password: set", foreground="green")
+            logging.info("Web library password updated (all web sessions logged out)")
+        if self.web_server:
+            self.stop_web()
+            self.start_web()
+        messagebox.showinfo("Success", "Web settings saved" + (" and the server restarted" if self.web_server else ""))
+
+    def auto_start_web(self):
+        settings = get_web_settings()
+        if settings['enabled'] and settings['password_hash']:
+            self.start_web(quiet=True)
+
+    def start_web(self, quiet=False):
+        if self.web_server:
+            return
+        settings = get_web_settings()
+        if not settings['password_hash']:
+            if not quiet:
+                messagebox.showerror("Error", "Set a password for the web library first")
+            return
+        if not settings['secret']:
+            from library.auth import new_secret
+            settings['secret'] = new_secret()
+            set_key('.env', 'WEB_SECRET', settings['secret'])
+            os.environ['WEB_SECRET'] = settings['secret']
+        try:
+            from library.server import LibraryServer
+            server = LibraryServer(
+                lambda: os.getenv('DOWNLOADS_PATH') or bot_config.DOWNLOADS_DIR,
+                settings['password_hash'], settings['secret'], port=settings['port'], host=settings['host'])
+            server.start_in_thread()
+        except Exception as e:
+            logging.error(f"Web library failed to start: {e}")
+            if not quiet:
+                messagebox.showerror("Error", f"Failed to start web library: {e}")
+            return
+        self.web_server = server
+        self.web_status_label.config(text=f"Running on port {settings['port']}", foreground="green")
+        self.web_start_button.config(state=tk.DISABLED)
+        self.web_stop_button.config(state=tk.NORMAL)
+        self.web_urls_label.config(text="Open: " + "   ".join(self._web_urls()))
+
+    def stop_web(self):
+        if self.web_server:
+            self.web_server.stop_thread()
+            self.web_server = None
+        self.web_status_label.config(text="Stopped", foreground="red")
+        self.web_start_button.config(state=tk.NORMAL)
+        self.web_stop_button.config(state=tk.DISABLED)
+        self.web_urls_label.config(text="")
+
+    def open_web(self):
+        import webbrowser
+        webbrowser.open(self._web_urls()[0])
 
     def setup_log_tab(self, parent):
         """Setup logs tab"""
@@ -761,6 +929,10 @@ class TelegramBotGUI:
             if self.bot_running:
                 self.bot_running = False
                 self._cancel_bot(join_timeout=5)
+
+            if self.web_server:
+                self.web_server.stop_thread(timeout=5)
+                self.web_server = None
             
             if self.tray_icon:
                 self.tray_icon.stop()

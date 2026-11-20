@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent: #e5484d;
+  --color-accent-hover: #f2555a;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-neutral-950 text-neutral-100 antialiased;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
+}
+
+/* thin range slider for the custom player */
+input[type="range"].seek {
+  @apply h-1 w-full cursor-pointer appearance-none rounded-full bg-white/25;
+  accent-color: var(--color-accent);
+}

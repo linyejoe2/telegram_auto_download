@@ -15,7 +15,7 @@ set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
 
 REM ===== Version constant =====
-set "APP_VERSION=2.7.7"
+set "APP_VERSION=3.0.0"
 REM ============================
 
 set "EXE_PATH=dist\TelegramAutoDownload\TelegramAutoDownload.exe"
@@ -31,11 +31,17 @@ if errorlevel 1 (
 
 REM [2/8] Clean (build_env is recreated so the bundle always matches requirements.txt)
 echo [2/8] Cleaning previous builds...
+REM A folder that is someone's current directory (open terminal / Explorer) can't be removed itself,
+REM but an empty leftover is harmless: only fail when files inside are still in use.
 for %%D in (build dist installer_output build_env) do (
-    if exist "%%D" rmdir /s /q "%%D"
+    if exist "%%D" rmdir /s /q "%%D" 2>nul
     if exist "%%D" (
-        call :fail "Could not remove %%D\. A file in it is in use - close any running installer, the app or Explorer window using it and try again."
-        goto :end
+        dir /b /a "%%D" 2>nul | findstr . >nul
+        if not errorlevel 1 (
+            call :fail "Could not remove files in %%D\. A file in it is in use - close any running installer, the app or Explorer window using it and try again."
+            goto :end
+        )
+        echo Note: %%D\ is open in another window, kept the empty folder.
     )
 )
 REM Keep our custom telegram_bot.spec file - only delete auto-generated ones
@@ -78,6 +84,30 @@ if errorlevel 1 (
 
 REM [5/8] Assets
 echo [5/8] Creating application assets...
+REM Web library frontend (React + Tailwind) is built into library\static and bundled by PyInstaller
+where npm >nul 2>nul
+if errorlevel 1 (
+    call :fail "Node.js / npm not found. Install Node.js 18+ (https://nodejs.org) to build the web library frontend."
+    goto :end
+)
+pushd frontend
+call npm ci
+if errorlevel 1 (
+    popd
+    call :fail "npm ci failed in frontend\."
+    goto :end
+)
+call npm run build
+if errorlevel 1 (
+    popd
+    call :fail "Web frontend build failed (npm run build)."
+    goto :end
+)
+popd
+if not exist "library\static\index.html" (
+    call :fail "Web frontend build output library\static\index.html not found."
+    goto :end
+)
 python create_version_info.py
 if errorlevel 1 (
     call :fail "Failed to create version info."

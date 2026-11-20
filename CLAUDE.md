@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v2.7.7) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v3.0.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -24,8 +24,15 @@ python main.py --gui
 ### Building Windows Installer
 
 ```bash
-# Complete build process (requires Python 3.8+ and Inno Setup)
+# Complete build process (requires Python 3.8+, Node.js 18+ and Inno Setup; step 5 runs npm ci && npm run build in frontend/)
 package_windows.bat
+```
+
+### Building the Web Library Frontend (v3.0.0)
+
+```bash
+# Outputs to library/static (gitignored); needed when running the web library from source
+cd frontend && npm install && npm run build
 ```
 
 ### Installing Dependencies
@@ -50,7 +57,7 @@ setup_build_env.bat
 ### Core Components
 
 ### GUI Application Components
-- **src/ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0, migrated to src/ in v1.3.0)
+- **src/ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0, migrated to src/ in v1.3.0); has a "Web Library" tab to start/stop the web video library and set its port, access, startup and password (v3.0.0)
 - **src/chromium_helper.py**: Chromium check/install for screenshots (`check_chromium()`, `install_chromium()` via Playwright's bundled node driver, `ensure_browsers_path()` pins `PLAYWRIGHT_BROWSERS_PATH` to `%LOCALAPPDATA%\ms-playwright` on Windows, v2.5.0)
 - **src/auth_helper.py**: GUI and console authentication helper for Telethon client (v1.0.0)
 
@@ -62,7 +69,11 @@ setup_build_env.bat
 - **src/database.py**: SQLite database management for download history and metadata
 - **src/folder_navigator.py**: Interactive folder navigation and path management system
 - **src/file_viewer.py**: Chat file viewer (`FileViewer`, `build_preview`, `source_link`, plus `list_videos`, `build_batch_preview`, `build_frame_preview`, `PreviewBatch` for folder video previews, v2.7.1) for `/files` (v2.7.0)
-- **config/config.py**: Configuration management using environment variables from `.env` file
+- **config/config.py**: Configuration management using environment variables from `.env` file (`get_web_settings()` for the web library, v3.0.0)
+
+### Web Library Components (v3.0.0)
+- **library/**: aiohttp backend of the web video library: `media.py` (ffprobe/ffmpeg, sidecar metadata), `store.py` (`Library`), `auth.py` (password/session), `server.py` (`LibraryServer`)
+- **frontend/**: React 18 + Vite 6 + Tailwind CSS 4 (react-router) UI; `npm run build` outputs to `library/static` (gitignored, bundled by `telegram_bot.spec`)
 
 ### URL Downloader Components (web/ package)
 - **web/url_parser.py**: URL detection (`extract_url`, `detect_type`, `extract_x_username`) and dispatch (`handle_url`, `download_confirmed`); types include `youtube`, `x`, `pornhub`, `x_profile` (v2.5.0)
@@ -180,6 +191,15 @@ Downloads media and/or screenshots of a whole X account (v2.5.0):
 - `download(user_id, dest_dir, processing_msg)`: Output to `<folder>/x_<username>/` (screenshots in `screenshots/`); media concurrent (5), named `<tweetid>_<n>.<ext>`, deduped by file existence and DB id `xprofile_<tweetid>_<n>`; screenshots via Playwright Chromium (3 concurrent); posts without media are never downloaded/screenshotted
 - Notes: gallery-dl must run in-process (frozen exe's `sys.executable` is the app, so `python -m gallery_dl` fails). Requires being logged in to X in Firefox. Screenshots need Chromium: use the GUI Install button (or `playwright install chromium` from source); not bundled by PyInstaller, media download works without it
 
+#### `LibraryServer` / `Library` (library/, v3.0.0)
+Web video library (watch and manage downloaded videos in a browser; Telegram/system settings stay in the Windows app):
+- `Library` (`store.py`): `scan()` walks the downloads folder (video id = base64url of the relative path, `encode_id`/`decode_id`, `resolve()` confines to the folder); 2 background workers (`queue_refresh()`/`_refresh()`) fill missing info and screenshots; source auto-filled from the bot DB (`_lookup_source` via `find_download`/`source_link`); `list()`, `detail()`, `update()`, `delete()`, `tags()`, `processing()`
+- `library/media.py`: `probe_info()` (ffprobe: width/height, bit rate, video bit rate, bit depth, codec/profile, fps, audio codec/channels/sample rate, duration, size), `make_screenshots()` (9 via ffmpeg), `direct_playable()`/`mime_codecs()`, `load_meta()`/`save_meta()`, `remove_sidecars()`; sidecars are hidden files next to the video: `.<file>.meta.json` (title, actors[], series, source, cached info) and `.<file>.shots/01.jpg..09.jpg` (the chat `/files` viewer skips dot files); web delete also removes the hidden `.720p_h265` copy
+- `library/auth.py`: `hash_password()`/`verify_password()` (PBKDF2, `WEB_PASSWORD_HASH`), `Sessions` (HMAC-signed cookie with `WEB_SECRET`; changing the password invalidates all sessions; 5 wrong passwords -> 15 min lockout per client)
+- `LibraryServer` (`server.py`, aiohttp; `start_in_thread()`/`stop_thread()` used by the GUI and CLI): `/api/login|logout|session|status|videos|videos/{id}` (GET/PATCH/DELETE)`|videos/{id}/screenshots|tags|rescan`; `/media/{id}/file` (HTTP range), `/media/{id}/stream?t=&h=480|720|1080` (live ffmpeg transcode to fragmented H.264/AAC MP4; no range support so Safari/iOS cannot play it), `/media/{id}/shots/NN.jpg`; serves `library/static` with SPA fallback; rescans every 5 min; security headers; paths confined to the downloads folder
+- Frontend (`frontend/`): pages Login, Library (grid, search, filter 主演/系列/資料夾, sort, filters in URL), VideoPage (3x3 screenshots, edit title/actors/series/source, Video Info, download, regenerate screenshots, delete); `components/Player.jsx` plays the original when `direct` and `canPlayType` allow, otherwise live transcode with custom controls (seek restarts the stream, ±10s, volume, 480/720/1080p, fullscreen, Space/←/→/F)
+- GUI: "Web Library" tab in `src/ui.py` (`setup_web_tab`, `start_web`, `stop_web`, `save_web_settings_clicked`, `auto_start_web`); `main.py --cli` also starts the library when `WEB_ENABLED=1`
+
 #### `AuthHelper` (src/auth_helper.py)
 GUI and console authentication management (v1.0.0):
 - `authenticate_client()`: Main authentication function with session handling
@@ -199,6 +219,7 @@ The bot requires these environment variables in `.env`:
 - `STARTUP_SCAN_COUNT` (optional, v2.6.1): number of latest messages sent to the bot that are scanned at startup (default 30, 0 = off); read via `config.get_startup_scan_count()`, editable in GUI Configuration tab; `DatabaseManager.is_url_downloaded()` checks links ignoring query params
 - Database (v2.7.0): `DatabaseManager.find_download(file_path)` returns the download record of a file on disk (path match, fallback file name + size so moved files are found); used by the file viewer for source links
 - Security (v2.7.0): the `/files` viewer is owner-only (`TelegramMediaBot.owner_id` = Telethon session account) and confined to the downloads folder
+- Web library (v3.0.0, all optional, read via `config.get_web_settings()`): `WEB_ENABLED` (1 = start with the bot, default 0), `WEB_PORT` (default 8765), `WEB_HOST` (`0.0.0.0` any location / `127.0.0.1` this PC only), `WEB_PASSWORD_HASH` (PBKDF2, set from the GUI Web Library tab, never plain text), `WEB_SECRET` (cookie signing key); needs ffmpeg/ffprobe in PATH or `FFMPEG_PATH`, `aiohttp`, and a built `library/static` (Node.js 18+)
 
 Additional requirements for X features (v2.5.0):
 - Log in to X in Firefox on the same machine (cookies are read from Firefox for X downloads and account scans)
@@ -227,6 +248,17 @@ telegram_auto_download/
 │   ├── x_downloader.py         # X/Twitter single post (yt-dlp)
 │   ├── p_downloader.py         # Pornhub (yt-dlp)
 │   └── x_profile_downloader.py # X account downloader (gallery-dl + Playwright, v2.5.0)
+├── library/                    # Web video library backend (v3.0.0)
+│   ├── __init__.py
+│   ├── media.py                # ffprobe info, ffmpeg screenshots, sidecar metadata
+│   ├── store.py                # Library: scan, background workers, tags
+│   ├── auth.py                 # Password hash, signed sessions, lockout
+│   ├── server.py               # aiohttp LibraryServer (API, media streaming, React build)
+│   └── static/                 # Built frontend (npm run build, gitignored)
+├── frontend/                   # Web library UI (React 18 + Vite 6 + Tailwind CSS 4, v3.0.0)
+│   ├── package.json
+│   ├── vite.config.js
+│   └── src/                    # App.jsx, api.js, pages/ (Login, Library, VideoPage), components/ (Player, TagInput, VideoCard)
 ├── config/
 │   └── config.py               # Configuration management
 ├── main.py                     # Unified application entry point (CLI/GUI)

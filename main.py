@@ -31,7 +31,7 @@ fix_stdin_stdout()
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from config.config import validate_config, API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN
+from config.config import validate_config, get_web_settings, DOWNLOADS_DIR, API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN
 from src.bot import TelegramMediaBot
 
 async def main():
@@ -41,6 +41,15 @@ async def main():
         validate_config()
         print("✅ Configuration validated successfully")
         
+        # Web video library (WEB_ENABLED=1 and a password set in the GUI)
+        web = get_web_settings()
+        if web['enabled'] and web['password_hash'] and web['secret']:
+            from library.server import LibraryServer
+            library = LibraryServer(lambda: os.getenv('DOWNLOADS_PATH') or DOWNLOADS_DIR, web['password_hash'],
+                                    web['secret'], port=web['port'], host=web['host'])
+            await library.start()
+            print(f"🎬 Web library: http://localhost:{web['port']}")
+
         # Create and run the bot
         bot = TelegramMediaBot(API_ID, API_HASH, PHONE_NUMBER, BOT_TOKEN)
         await bot.run()
