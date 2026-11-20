@@ -1,5 +1,12 @@
 # ChangeLog
 
+## [3.0.2] - 2026-11-20 - Quality Sort & Partial Download Fix
+### Added
+- Library list view shows bit rate under the resolution; new 畫質 sort (resolution, then bit rate) in the sort menu and on the list column header
+### Fixed
+- Telegram media downloads to `<name>.part` and is renamed when complete (`downloader.py`), so the web library no longer probes half-written videos ("moov atom not found"); the library waits for files changed in the last 90 s, shows "檔案不完整或已損毀" for broken files
+- `package_windows.bat` reuses `build_env\` and the PyInstaller cache (`package_windows.bat fresh` rebuilds from scratch); an empty locked output folder no longer stops the build
+
 ## [3.0.1] - 2026-11-20 - Library Folder Tree
 ### Added
 - Web library folder tree (`FolderTree.jsx`): browse folders, `＋ 新增` folder, drag videos / folders onto a folder to move them, right-click (or `⋯`) to rename / add sub folder / delete empty folder; right-click a video to open, rename, go to its folder or delete

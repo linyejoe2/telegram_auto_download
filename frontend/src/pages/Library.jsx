@@ -10,6 +10,12 @@ const SORTS = {
   title: { label: '標題', fn: (a, b) => a.title.localeCompare(b.title, 'zh-Hant') },
   duration: { label: '片長', fn: (a, b) => (b.duration || 0) - (a.duration || 0) },
   size: { label: '檔案大小', fn: (a, b) => (b.size || 0) - (a.size || 0) },
+  // resolution (short side, so portrait videos count the same) first, then bit rate
+  quality: {
+    label: '畫質',
+    fn: (a, b) =>
+      Math.min(b.width || 0, b.height || 0) - Math.min(a.width || 0, a.height || 0) || (b.bit_rate || 0) - (a.bit_rate || 0),
+  },
 }
 
 function readView() {
@@ -357,12 +363,18 @@ export default function Library({ guard, onLogout }) {
           </div>
         ) : (
           <div>
-            <div className="hidden grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_64px_64px_80px] gap-3 border-b border-white/5 px-2 pb-2 text-xs text-neutral-500 md:grid">
+            <div className="hidden grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_88px_64px_80px] gap-3 border-b border-white/5 px-2 pb-2 text-xs text-neutral-500 md:grid">
               <span />
               <span>標題 / 檔案</span>
               <span>主演</span>
               <span>系列</span>
-              <span>畫質</span>
+              <button
+                onClick={() => setParam('sort', sort === 'quality' ? '' : 'quality')}
+                className={`text-left hover:text-white ${sort === 'quality' ? 'text-white' : ''}`}
+                title="依畫質排序（解析度，再比 bit rate）"
+              >
+                畫質 / bit rate{sort === 'quality' ? ' ↓' : ''}
+              </button>
               <span>片長</span>
               <span className="text-right">大小</span>
             </div>

@@ -146,7 +146,10 @@ def probe_info(video: str) -> dict:
         capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=_NO_WINDOW,
     )
     if out.returncode != 0:
-        raise RuntimeError(f'ffprobe 失敗: {out.stderr.strip()[-200:]}')
+        err = out.stderr.strip()
+        if 'moov atom not found' in err or 'Invalid data found' in err:
+            raise RuntimeError('檔案不完整或已損毀（下載可能未完成或曾被中斷），請重新下載')
+        raise RuntimeError(f'ffprobe 失敗: {err[-200:]}')
     data = json.loads(out.stdout or '{}')
     fmt = data.get('format') or {}
     streams = data.get('streams') or []

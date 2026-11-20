@@ -2,6 +2,8 @@
 REM Telegram Auto Download Bot - Complete Windows Package Builder
 REM Builds the executable with PyInstaller, then the installer with Inno Setup.
 REM Any failing step stops the build immediately.
+REM Fast by default: build_env\ and the PyInstaller cache in build\ are reused between builds.
+REM   package_windows.bat fresh   = rebuild everything from scratch (new build_env, no cache)
 
 setlocal
 
@@ -13,9 +15,11 @@ echo.
 
 set "START_TIME=%TIME%"
 set "ERROR_OCCURRED=0"
+set "FRESH=0"
+if /i "%~1"=="fresh" set "FRESH=1"
 
 REM ===== Version constant =====
-set "APP_VERSION=3.0.1"
+set "APP_VERSION=3.0.2"
 REM ============================
 
 set "EXE_PATH=dist\TelegramAutoDownload\TelegramAutoDownload.exe"
@@ -29,11 +33,16 @@ if errorlevel 1 (
     goto :end
 )
 
-REM [2/8] Clean (build_env is recreated so the bundle always matches requirements.txt)
+REM [2/8] Clean: only the outputs, unless "fresh" (then also the cache and build_env)
 echo [2/8] Cleaning previous builds...
+set "CLEAN_DIRS=dist installer_output"
+if "%FRESH%"=="1" (
+    echo Fresh build: removing build_env\ and the PyInstaller cache too
+    set "CLEAN_DIRS=build dist installer_output build_env"
+)
 REM A folder that is someone's current directory (open terminal / Explorer) can't be removed itself,
 REM but an empty leftover is harmless: only fail when files inside are still in use.
-for %%D in (build dist installer_output build_env) do (
+for %%D in (%CLEAN_DIRS%) do (
     if exist "%%D" rmdir /s /q "%%D" 2>nul
     if exist "%%D" (
         dir /b /a "%%D" 2>nul | findstr . >nul
@@ -52,10 +61,16 @@ if exist "version_info.txt" del "version_info.txt"
 
 REM [3/8] Virtual environment
 echo [3/8] Setting up build environment...
-python -m venv build_env
-if errorlevel 1 (
-    call :fail "Failed to create virtual environment."
-    goto :end
+set "NEW_ENV=0"
+if not exist "build_env\Scripts\python.exe" (
+    set "NEW_ENV=1"
+    python -m venv build_env
+    if errorlevel 1 (
+        call :fail "Failed to create virtual environment."
+        goto :end
+    )
+) else (
+    echo Reusing build_env\ ^(run "package_windows.bat fresh" to recreate it^)
 )
 call build_env\Scripts\activate.bat
 if errorlevel 1 (
@@ -65,11 +80,14 @@ if errorlevel 1 (
 
 REM [4/8] Dependencies
 echo [4/8] Installing build dependencies...
-python -m pip install --upgrade pip setuptools wheel
-if errorlevel 1 (
-    call :fail "Failed to upgrade pip/setuptools/wheel."
-    goto :end
+if "%NEW_ENV%"=="1" (
+    python -m pip install --upgrade pip setuptools wheel
+    if errorlevel 1 (
+        call :fail "Failed to upgrade pip/setuptools/wheel."
+        goto :end
+    )
 )
+REM quick when everything is already installed; only new / changed requirements are downloaded
 python -m pip install -r requirements.txt
 if errorlevel 1 (
     call :fail "Failed to install requirements.txt."
@@ -133,7 +151,11 @@ if not exist "telegram_bot.spec" (
     call :fail "telegram_bot.spec not found."
     goto :end
 )
-pyinstaller telegram_bot.spec --clean --noconfirm
+if "%FRESH%"=="1" (
+    pyinstaller telegram_bot.spec --clean --noconfirm
+) else (
+    pyinstaller telegram_bot.spec --noconfirm
+)
 if errorlevel 1 (
     call :fail "PyInstaller failed."
     goto :end

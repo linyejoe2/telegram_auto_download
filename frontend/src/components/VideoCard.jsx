@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { fmtDuration, fmtSize, resolutionLabel, setDragItems } from '../api.js'
+import { fmtBitrate, fmtDuration, fmtSize, resolutionLabel, setDragItems } from '../api.js'
 
 // shared by the card and list views: drag to a folder to move, right-click for rename / delete
 function itemProps(video, onMenu) {
@@ -26,8 +26,8 @@ export default function VideoCard({ video, search, onMenu }) {
         {video.cover ? (
           <img src={video.cover} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-neutral-500">
-            {video.ready ? '沒有截圖' : '產生截圖中…'}
+          <div className="flex h-full items-center justify-center px-3 text-center text-xs text-neutral-500" title={video.error || undefined}>
+            {video.error ? '⚠ 檔案不完整或無法讀取' : video.ready ? '沒有截圖' : '產生截圖中…'}
           </div>
         )}
         {res && <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium">{res}</span>}
@@ -52,7 +52,7 @@ export function VideoRow({ video, search, onMenu }) {
       to={`/v/${video.id}`}
       state={{ back: search }}
       {...itemProps(video, onMenu)}
-      className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5 md:grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_64px_64px_80px]"
+      className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5 md:grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_88px_64px_80px]"
     >
       <div className="aspect-video overflow-hidden rounded bg-neutral-800">
         {video.cover && <img src={video.cover} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
@@ -63,12 +63,15 @@ export function VideoRow({ video, search, onMenu }) {
           {video.folder ? `${video.folder}/` : ''}{video.file}
         </p>
         <p className="truncate text-xs text-neutral-400 md:hidden">
-          {[fmtDuration(video.duration), resolutionLabel(video.width, video.height), video.actors.join('、')].filter(Boolean).join(' · ')}
+          {[fmtDuration(video.duration), resolutionLabel(video.width, video.height), video.bit_rate && fmtBitrate(video.bit_rate), video.actors.join('、')].filter(Boolean).join(' · ')}
         </p>
       </div>
       <p className="hidden truncate text-sm text-neutral-300 md:block">{video.actors.join('、') || '-'}</p>
       <p className="hidden truncate text-sm text-accent md:block">{video.series || '-'}</p>
-      <p className="hidden text-sm tabular-nums text-neutral-400 md:block">{resolutionLabel(video.width, video.height) || '-'}</p>
+      <div className="hidden leading-tight tabular-nums md:block" title={video.width ? `${video.width} × ${video.height}` : undefined}>
+        <p className="text-sm text-neutral-300">{resolutionLabel(video.width, video.height) || '-'}</p>
+        {video.bit_rate ? <p className="text-xs text-neutral-500">{fmtBitrate(video.bit_rate)}</p> : null}
+      </div>
       <p className="hidden text-sm tabular-nums text-neutral-400 md:block">{fmtDuration(video.duration)}</p>
       <p className="hidden text-right text-sm tabular-nums text-neutral-400 md:block">{fmtSize(video.size)}</p>
     </Link>

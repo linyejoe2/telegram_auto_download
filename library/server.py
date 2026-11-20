@@ -331,7 +331,8 @@ class LibraryServer:
                 await loop.run_in_executor(None, self.library.scan)
             except Exception as e:
                 logger.warning(f"影片庫掃描失敗: {e}")
-            await asyncio.sleep(RESCAN_SECONDS)
+            # come back soon for files that were still being written
+            await asyncio.sleep(60 if self.library.deferred else RESCAN_SECONDS)
 
     async def stop(self):
         if self._rescan_task:

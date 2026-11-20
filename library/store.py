@@ -20,6 +20,7 @@ from . import media
 logger = logging.getLogger(__name__)
 
 BACKGROUND_WORKERS = 2
+SETTLE_SECONDS = 90          # a file changed more recently may still be downloading / copying: wait
 _BAD_NAME_CHARS = set('<>:"/\\|?*')
 
 
@@ -70,6 +71,7 @@ class Library:
         self._pool = ThreadPoolExecutor(max_workers=BACKGROUND_WORKERS, thread_name_prefix='library')
         self._pending = set()                    # ids with a background job queued / running
         self.last_scan = 0.0
+        self.deferred = 0                        # videos skipped by the last scan because they're still changing
 
     # ── paths ──
 
@@ -114,10 +116,21 @@ class Library:
                     self.entries[vid] = {'path': path, 'rel': rel, 'meta': media.load_meta(path), 'error': None}
             self.last_scan = time.time()
             todo = [vid for vid, e in self.entries.items() if self._needs_refresh(e)]
+            fresh = [vid for vid in todo if self._still_changing(self.entries[vid]['path'])]
+            todo = [vid for vid in todo if vid not in fresh]
+            self.deferred = len(fresh)
         for vid in todo:
             self.queue_refresh(vid)
-        logger.info(f"影片庫掃描完成：{len(found)} 部影片，{len(todo)} 部需要產生資訊/截圖")
+        logger.info(f"影片庫掃描完成：{len(found)} 部影片，{len(todo)} 部需要產生資訊/截圖"
+                    + (f"，{self.deferred} 部仍在寫入中，稍後再處理" if self.deferred else ""))
         return len(found)
+
+    @staticmethod
+    def _still_changing(path: str) -> bool:
+        try:
+            return time.time() - os.path.getmtime(path) < SETTLE_SECONDS
+        except OSError:
+            return True
 
     @staticmethod
     def _needs_refresh(entry: dict) -> bool:
@@ -210,10 +223,12 @@ class Library:
             'duration': info.get('duration'),
             'width': info.get('width'),
             'height': info.get('height'),
+            'bit_rate': info.get('bit_rate'),
             'size': info.get('size') or self._size(entry['path']),
             'added': meta.get('added'),
             'cover': f"/media/{vid}/shots/{meta['shots'][0]}" if meta.get('shots') else None,
             'ready': bool(meta.get('info') and meta.get('shots')),
+            'error': entry.get('error'),
         }
 
     def detail(self, vid: str) -> Optional[dict]:

@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.0.1
+# Telegram Auto Download Bot v3.0.2
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -45,7 +45,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.0.1.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.0.2.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -103,7 +103,7 @@ Install the following on your Windows system:
 
 #### 🛠️ Build Steps
 
-Run: `package_windows.bat`
+Run: `package_windows.bat` (reuses `build_env\` and the PyInstaller cache for faster rebuilds; `package_windows.bat fresh` rebuilds everything from scratch, e.g. after removing a package from `requirements.txt`)
 
 > This script performs the following:
 >
@@ -192,7 +192,7 @@ A browser app (v3.0.0) for watching and managing the videos in your downloads fo
 - **Setup:** open the GUI **Web Library** tab, set a password (at least 8 characters, stored only as a hash), choose the port (default 8765) and access (any location `0.0.0.0` / this PC only), then click **Start** (tick **Start on launch** to run it with the app; `main.py --cli` also starts it when `WEB_ENABLED=1`). **Open in Browser** or use the URLs shown in the tab, e.g. `http://localhost:8765`. Changing the password logs out every session; 5 wrong passwords lock that client for 15 minutes.
 - **Remote access:** the library speaks plain HTTP, so for access from outside put it behind an HTTPS tunnel (Cloudflare Tunnel or Tailscale are recommended) or use port forwarding at your own risk.
 - **Folder tree (v3.0.1):** the left side lists every folder with video counts; click to browse, `＋ 新增` adds a folder, drag a video or folder onto a folder to move it, right-click (or `⋯`) a folder to rename / add a sub folder / delete it (empty only) and right-click a video to open, rename, go to its folder or delete. Moved and renamed videos keep their info and screenshots.
-- **Library page:** card or list view (▦ / ☰, remembered per browser) of videos (cover = first screenshot, resolution and duration badges), search, filter by 主演 / 系列, sort by 最新加入 / 標題 / 片長 / 檔案大小 (filters are kept in the URL), rescan, logout, and a count of videos still being processed.
+- **Library page:** card or list view (▦ / ☰, remembered per browser) of videos (cover = first screenshot, resolution and duration badges), search, filter by 主演 / 系列, sort by 最新加入 / 標題 / 片長 / 檔案大小 / 畫質 (resolution, then bit rate; the list view shows bit rate under the resolution, v3.0.2) (filters are kept in the URL), rescan, logout, and a count of videos still being processed.
 - **Video page:** cover with play button and a 3x3 screenshot grid (click a screenshot to play from there); edit 標題 / 主演 (multi-select tags) / 系列 / 來源 (auto-filled from the download record); Video Info (size, bit rate, bit depth, codec, fps, audio, duration, playback mode, location); download the original, regenerate screenshots, delete (with confirmation).
 - **Playback:** the original file is played when the browser supports it; otherwise (or if it fails) the server transcodes live with ffmpeg to H.264/AAC with seek, ±10s, volume, 480/720/1080p, fullscreen and keys Space / ←/→ / F. Safari/iOS cannot play the live transcode.
 - **Where data is stored:** next to each video as hidden files `.<file>.meta.json` (title, actors, series, source, cached info) and `.<file>.shots/01.jpg-09.jpg`; the chat `/files` viewer skips them. Deleting from the web also removes the video, these files and the hidden `.720p_h265` copy. The downloads folder is rescanned every 5 minutes.

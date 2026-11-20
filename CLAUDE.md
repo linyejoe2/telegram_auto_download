@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v3.0.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v3.0.2) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -26,6 +26,9 @@ python main.py --gui
 ```bash
 # Complete build process (requires Python 3.8+, Node.js 18+ and Inno Setup; step 5 runs npm ci && npm run build in frontend/)
 package_windows.bat
+
+# Full rebuild (new build_env, no PyInstaller cache), v3.0.2
+package_windows.bat fresh
 ```
 
 ### Building the Web Library Frontend (v3.0.0)
@@ -193,11 +196,11 @@ Downloads media and/or screenshots of a whole X account (v2.5.0):
 
 #### `LibraryServer` / `Library` (library/, v3.0.0)
 Web video library (watch and manage downloaded videos in a browser; Telegram/system settings stay in the Windows app):
-- `Library` (`store.py`): `scan()` walks the downloads folder (video id = base64url of the relative path, `encode_id`/`decode_id`, `resolve()` confines to the folder); 2 background workers (`queue_refresh()`/`_refresh()`) fill missing info and screenshots; source auto-filled from the bot DB (`_lookup_source` via `find_download`/`source_link`); `list()`, `detail()`, `update()`, `delete()`, `tags()`, `processing()`; folder / file management (v3.0.1): `folders()`, `create_folder()`, `rename_folder()`, `delete_folder()` (empty only), `rename_video()` (keeps the extension), `move(video_ids, folders, dest)`; `_move_video()` carries the hidden sidecars (`_sidecars()`: meta, shots, `.720p_h265` copy), `check_name()` validates names, `_check_not_busy()` refuses videos still being processed, errors are `LibraryError(message, status)`
+- `Library` (`store.py`): `scan()` walks the downloads folder (files changed in the last `SETTLE_SECONDS`=90 are deferred as still being written, `deferred` makes the next rescan come after 60 s; v3.0.2) (video id = base64url of the relative path, `encode_id`/`decode_id`, `resolve()` confines to the folder); 2 background workers (`queue_refresh()`/`_refresh()`) fill missing info and screenshots; source auto-filled from the bot DB (`_lookup_source` via `find_download`/`source_link`); `list()`, `detail()`, `update()`, `delete()`, `tags()`, `processing()`; folder / file management (v3.0.1): `folders()`, `create_folder()`, `rename_folder()`, `delete_folder()` (empty only), `rename_video()` (keeps the extension), `move(video_ids, folders, dest)`; `_move_video()` carries the hidden sidecars (`_sidecars()`: meta, shots, `.720p_h265` copy), `check_name()` validates names, `_check_not_busy()` refuses videos still being processed, errors are `LibraryError(message, status)`
 - `library/media.py`: `probe_info()` (ffprobe: width/height, bit rate, video bit rate, bit depth, codec/profile, fps, audio codec/channels/sample rate, duration, size), `make_screenshots()` (9 via ffmpeg), `direct_playable()`/`mime_codecs()`, `load_meta()`/`save_meta()`, `remove_sidecars()`; sidecars are hidden files next to the video: `.<file>.meta.json` (title, actors[], series, source, cached info) and `.<file>.shots/01.jpg..09.jpg` (the chat `/files` viewer skips dot files); web delete also removes the hidden `.720p_h265` copy
 - `library/auth.py`: `hash_password()`/`verify_password()` (PBKDF2, `WEB_PASSWORD_HASH`), `Sessions` (HMAC-signed cookie with `WEB_SECRET`; changing the password invalidates all sessions; 5 wrong passwords -> 15 min lockout per client)
 - `LibraryServer` (`server.py`, aiohttp; `start_in_thread()`/`stop_thread()` used by the GUI and CLI): `/api/login|logout|session|status|videos|videos/{id}` (GET/PATCH/DELETE)`|videos/{id}/screenshots|tags|rescan`, `/api/folders` (GET/POST), `/api/folders/rename|delete`, `/api/videos/{id}/rename`, `/api/move` (v3.0.1); `/media/{id}/file` (HTTP range), `/media/{id}/stream?t=&h=480|720|1080` (live ffmpeg transcode to fragmented H.264/AAC MP4; no range support so Safari/iOS cannot play it), `/media/{id}/shots/NN.jpg`; serves `library/static` with SPA fallback; rescans every 5 min; security headers; paths confined to the downloads folder
-- Frontend (`frontend/`): pages Login, Library (left `FolderTree` with drag & drop move, right-click `ContextMenu` / `PromptDialog` from `components/Dialogs.jsx`, card/list view switch stored in localStorage `tad.view`, search, filter 主演/系列, sort, filters in URL; v3.0.1), VideoPage (3x3 screenshots, edit title/actors/series/source, Video Info, download, regenerate screenshots, delete); `components/Player.jsx` plays the original when `direct` and `canPlayType` allow, otherwise live transcode with custom controls (seek restarts the stream, ±10s, volume, 480/720/1080p, fullscreen, Space/←/→/F)
+- Frontend (`frontend/`): pages Login, Library (left `FolderTree` with drag & drop move, right-click `ContextMenu` / `PromptDialog` from `components/Dialogs.jsx`, card/list view switch stored in localStorage `tad.view`, list shows bit rate + 畫質 sort (short side, then bit rate, v3.0.2), search, filter 主演/系列, sort, filters in URL; v3.0.1), VideoPage (3x3 screenshots, edit title/actors/series/source, Video Info, download, regenerate screenshots, delete); `components/Player.jsx` plays the original when `direct` and `canPlayType` allow, otherwise live transcode with custom controls (seek restarts the stream, ±10s, volume, 480/720/1080p, fullscreen, Space/←/→/F)
 - GUI: "Web Library" tab in `src/ui.py` (`setup_web_tab`, `start_web`, `stop_web`, `save_web_settings_clicked`, `auto_start_web`); `main.py --cli` also starts the library when `WEB_ENABLED=1`
 
 #### `AuthHelper` (src/auth_helper.py)

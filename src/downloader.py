@@ -52,8 +52,20 @@ class MediaDownloader:
         
         return 0
 
+    @staticmethod
+    def _remove_partial(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
     async def download_media_with_retry(self, message, file_path, max_retries=3):
-        """下載媒體文件，包含重試機制和進度追蹤"""
+        """下載媒體文件，包含重試機制和進度追蹤
+
+        先下載到 "<檔名>.part"，完成後才改成正式檔名：下載中或中斷的檔案不會被當成完整影片
+        （網頁影片庫、/files 都會略過 .part）。
+        """
+        tmp_path = file_path + '.part'
         async with self.download_semaphore:  # 控制併發數量
             for attempt in range(max_retries):
                 try:
@@ -76,10 +88,14 @@ class MediaDownloader:
                     
                     await self.client.download_media(
                         message, 
-                        file_path,
+                        tmp_path,
                         progress_callback=progress_callback
                     )
-                    
+                    if not os.path.exists(tmp_path):
+                        logger.error(f"下載沒有產生檔案: {file_path}")
+                        return False
+                    os.replace(tmp_path, file_path)
+
                     # 更新統計
                     if os.path.exists(file_path) and self.monitor:
                         file_size = os.path.getsize(file_path)
@@ -92,6 +108,7 @@ class MediaDownloader:
                 except (ConnectionError, OSError, asyncio.TimeoutError, RPCError) as e:
                     if attempt == max_retries - 1:
                         logger.error(f"下載失敗，已嘗試 {max_retries} 次: {e}")
+                        self._remove_partial(tmp_path)
                         if self.monitor:
                             stats = self.monitor.get_stats()
                             stats['failed_files'] += 1
@@ -108,6 +125,7 @@ class MediaDownloader:
                     
                 except Exception as e:
                     logger.error(f"下載時發生未知錯誤: {e}")
+                    self._remove_partial(tmp_path)
                     if self.monitor:
                         stats = self.monitor.get_stats()
                         stats['failed_files'] += 1
