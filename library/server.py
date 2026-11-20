@@ -24,7 +24,7 @@ from aiohttp import web
 
 from . import media
 from .auth import Sessions, verify_password
-from .store import Library
+from .store import Library, LibraryError
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,12 @@ class LibraryServer:
         r.add_delete('/api/videos/{id}', self.delete_video)
         r.add_post('/api/videos/{id}/screenshots', self.regenerate_shots)
         r.add_get('/api/tags', self.tags)
+        r.add_get('/api/folders', self.list_folders)
+        r.add_post('/api/folders', self.create_folder)
+        r.add_post('/api/folders/rename', self.rename_folder)
+        r.add_post('/api/folders/delete', self.delete_folder)
+        r.add_post('/api/videos/{id}/rename', self.rename_video)
+        r.add_post('/api/move', self.move)
         r.add_post('/api/rescan', self.rescan)
         r.add_get('/media/{id}/file', self.media_file)
         r.add_get('/media/{id}/stream', self.media_stream)
@@ -182,6 +188,56 @@ class LibraryServer:
 
     async def tags(self, request: web.Request):
         return web.json_response(self.library.tags())
+
+    # ── folders & file management (drag & drop, rename, new folder) ──
+
+    async def _run(self, fn, *args):
+        """Run a blocking library change; LibraryError / OSError become JSON errors."""
+        try:
+            return await asyncio.get_running_loop().run_in_executor(None, fn, *args), None
+        except LibraryError as e:
+            return None, web.json_response({'error': str(e)}, status=e.status)
+        except OSError as e:
+            return None, web.json_response({'error': f'檔案操作失敗：{e.strerror or e}'}, status=500)
+
+    @staticmethod
+    async def _body(request: web.Request) -> dict:
+        try:
+            data = await request.json()
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    async def list_folders(self, request: web.Request):
+        folders, error = await self._run(self.library.folders)
+        return error or web.json_response({'folders': folders})
+
+    async def create_folder(self, request: web.Request):
+        body = await self._body(request)
+        path, error = await self._run(self.library.create_folder, body.get('parent', ''), body.get('name', ''))
+        return error or web.json_response({'path': path})
+
+    async def rename_folder(self, request: web.Request):
+        body = await self._body(request)
+        path, error = await self._run(self.library.rename_folder, body.get('path', ''), body.get('name', ''))
+        return error or web.json_response({'path': path})
+
+    async def delete_folder(self, request: web.Request):
+        body = await self._body(request)
+        _, error = await self._run(self.library.delete_folder, body.get('path', ''))
+        return error or web.json_response({'ok': True})
+
+    async def rename_video(self, request: web.Request):
+        body = await self._body(request)
+        vid, error = await self._run(self.library.rename_video, request.match_info['id'], body.get('name', ''))
+        return error or web.json_response({'id': vid})
+
+    async def move(self, request: web.Request):
+        body = await self._body(request)
+        videos = [str(v) for v in body.get('videos') or [] if isinstance(v, str)]
+        folders = [str(f) for f in body.get('folders') or [] if isinstance(f, str)]
+        result, error = await self._run(self.library.move, videos, folders, body.get('dest', ''))
+        return error or web.json_response(result)
 
     async def rescan(self, request: web.Request):
         count = await asyncio.get_running_loop().run_in_executor(None, self.library.scan)

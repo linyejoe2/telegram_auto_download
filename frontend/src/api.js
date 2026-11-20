@@ -26,7 +26,32 @@ export const api = {
   regenerateShots: (id) => request('POST', `/api/videos/${id}/screenshots`),
   tags: () => request('GET', '/api/tags'),
   rescan: () => request('POST', '/api/rescan'),
+  folders: () => request('GET', '/api/folders'),
+  createFolder: (parent, name) => request('POST', '/api/folders', { parent, name }),
+  renameFolder: (path, name) => request('POST', '/api/folders/rename', { path, name }),
+  deleteFolder: (path) => request('POST', '/api/folders/delete', { path }),
+  renameVideo: (id, name) => request('POST', `/api/videos/${id}/rename`, { name }),
+  move: (videos, folders, dest) => request('POST', '/api/move', { videos, folders, dest }),
 }
+
+// drag & drop payload between video items and folder tree nodes
+export const DRAG_TYPE = 'application/x-tad-items'
+
+export function setDragItems(e, items) {
+  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(items))
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+export function getDragItems(e) {
+  try {
+    return JSON.parse(e.dataTransfer.getData(DRAG_TYPE))
+  } catch {
+    return null
+  }
+}
+
+export const baseName = (path) => path.split('/').pop()
+export const parentOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 
 export function fmtDuration(seconds) {
   if (seconds == null || isNaN(seconds)) return '--:--'

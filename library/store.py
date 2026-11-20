@@ -9,6 +9,7 @@ folder, base64url-encoded, so links survive restarts; every id is checked to sta
 import base64
 import logging
 import os
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,35 @@ from . import media
 logger = logging.getLogger(__name__)
 
 BACKGROUND_WORKERS = 2
+_BAD_NAME_CHARS = set('<>:"/\\|?*')
+
+
+class LibraryError(Exception):
+    """A request the library refuses; `status` is the HTTP status to answer with."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+def check_name(name: str) -> str:
+    """A safe single file / folder name (no paths, no hidden names, valid on Windows)."""
+    name = str(name or '').strip()
+    if (not name or name in ('.', '..') or name.startswith('.') or name.endswith(('.', ' ')) or len(name) > 200
+            or any(c in _BAD_NAME_CHARS or ord(c) < 32 for c in name)):
+        raise LibraryError('名稱不合法（不可空白、不可以 . 開頭，也不能包含 \\ / : * ? " < > |）')
+    return name
+
+
+def _sidecars(video: str) -> list:
+    """Hidden files that belong to a video and move / rename with it."""
+    paths = [media.meta_path(video), media.shots_dir(video)]
+    try:
+        from src.video_loader import compressed_path    # the bot's 「載入影片」 compressed copy
+        paths.append(compressed_path(video))
+    except ImportError:
+        pass
+    return paths
 
 
 def encode_id(rel: str) -> str:
@@ -262,6 +292,154 @@ class Library:
             del self.entries[vid]
         logger.info(f"影片庫：已刪除 {entry['path']}")
         return True
+
+    # ── folders & file management ──
+
+    def _folder(self, rel: str) -> str:
+        """Absolute path of a folder given relative to the downloads folder ('' = the root)."""
+        rel = str(rel or '').strip().strip('/\\')
+        base = self.base()
+        target = os.path.realpath(os.path.join(base, rel))
+        try:
+            inside = os.path.normcase(os.path.commonpath([base, target])) == os.path.normcase(base)
+        except ValueError:
+            inside = False
+        if not inside or any(part.startswith('.') for part in rel.replace('\\', '/').split('/') if part):
+            raise LibraryError('資料夾不在下載資料夾內', 403)
+        if not os.path.isdir(target):
+            raise LibraryError('找不到資料夾', 404)
+        return target
+
+    def _rel(self, path: str) -> str:
+        rel = os.path.relpath(path, self.base()).replace(os.sep, '/')
+        return '' if rel == '.' else rel
+
+    def _is_base(self, path: str) -> bool:
+        return os.path.normcase(path) == os.path.normcase(self.base())
+
+    def _check_not_busy(self, path: str):
+        """Refuse to move a video (or a folder holding one) while its info / screenshots are being made."""
+        prefix = os.path.normcase(path.rstrip(os.sep) + os.sep)
+        with self._lock:
+            for vid in self._pending:
+                entry = self.entries.get(vid)
+                if entry and (os.path.normcase(entry['path']) == os.path.normcase(path)
+                              or os.path.normcase(entry['path']).startswith(prefix)):
+                    raise LibraryError('影片正在產生資訊/截圖，請稍後再試', 409)
+
+    def folders(self) -> List[dict]:
+        """Every (non-hidden) folder with the number of videos directly inside it."""
+        base = self.base()
+        direct = {}
+        with self._lock:
+            for e in self.entries.values():
+                folder = os.path.dirname(e['rel'])
+                direct[folder] = direct.get(folder, 0) + 1
+        out = [{'path': '', 'videos': direct.get('', 0)}]
+        for root, dirs, _ in os.walk(base):
+            dirs[:] = sorted((d for d in dirs if not d.startswith('.')), key=str.lower)
+            for d in dirs:
+                rel = self._rel(os.path.join(root, d))
+                out.append({'path': rel, 'videos': direct.get(rel, 0)})
+        return out
+
+    def create_folder(self, parent: str, name: str) -> str:
+        target = os.path.join(self._folder(parent), check_name(name))
+        if os.path.exists(target):
+            raise LibraryError('已經有同名的資料夾或檔案', 409)
+        os.makedirs(target)
+        logger.info(f"影片庫：建立資料夾 {target}")
+        return self._rel(target)
+
+    def rename_folder(self, rel: str, name: str) -> str:
+        src = self._folder(rel)
+        if self._is_base(src):
+            raise LibraryError('不能重新命名根目錄')
+        dst = os.path.join(os.path.dirname(src), check_name(name))
+        self._move_path(src, dst)
+        self.scan()
+        return self._rel(dst)
+
+    def delete_folder(self, rel: str):
+        src = self._folder(rel)
+        if self._is_base(src):
+            raise LibraryError('不能刪除根目錄')
+        if os.listdir(src):
+            raise LibraryError('只能刪除空的資料夾', 409)
+        os.rmdir(src)
+        logger.info(f"影片庫：刪除資料夾 {src}")
+
+    def rename_video(self, vid: str, name: str) -> str:
+        """Rename the file (the extension is kept when left out); returns the new id."""
+        src = self.resolve(vid)
+        if not src:
+            raise LibraryError('找不到影片', 404)
+        name = check_name(name)
+        ext = os.path.splitext(src)[1]
+        if os.path.splitext(name)[1].lower() != ext.lower():
+            name += ext
+        dst = os.path.join(os.path.dirname(src), name)
+        self._move_video(src, dst)
+        self.scan()
+        return encode_id(self._rel(dst))
+
+    def move(self, video_ids: List[str], folders: List[str], dest: str) -> dict:
+        """Move videos (with their hidden sidecars) and folders into `dest`; returns moved / failed."""
+        target = self._folder(dest)
+        moved, failed = [], []
+        for vid in video_ids or []:
+            src = self.resolve(str(vid))
+            try:
+                if not src:
+                    raise LibraryError('找不到影片', 404)
+                self._move_video(src, os.path.join(target, os.path.basename(src)))
+                moved.append(os.path.basename(src))
+            except (LibraryError, OSError) as e:
+                failed.append({'name': os.path.basename(src or str(vid)), 'error': str(e)})
+        for rel in folders or []:
+            try:
+                src = self._folder(rel)
+                if self._is_base(src):
+                    raise LibraryError('不能移動根目錄')
+                if os.path.normcase(target + os.sep).startswith(os.path.normcase(src + os.sep)):
+                    raise LibraryError('不能把資料夾移到它自己裡面')
+                self._move_path(src, os.path.join(target, os.path.basename(src)))
+                moved.append(os.path.basename(src))
+            except (LibraryError, OSError) as e:
+                failed.append({'name': str(rel), 'error': str(e)})
+        self.scan()
+        return {'moved': moved, 'failed': failed}
+
+    def _move_path(self, src: str, dst: str):
+        if os.path.normcase(src) == os.path.normcase(dst):
+            return
+        if os.path.exists(dst):
+            raise LibraryError(f'「{os.path.basename(dst)}」已經存在', 409)
+        self._check_not_busy(src)
+        shutil.move(src, dst)
+        logger.info(f"影片庫：{src} -> {dst}")
+
+    def _move_video(self, src: str, dst: str):
+        if os.path.normcase(src) == os.path.normcase(dst):
+            return
+        if os.path.exists(dst):
+            raise LibraryError(f'「{os.path.basename(dst)}」已經存在', 409)
+        self._check_not_busy(src)
+        with self._lock:
+            entry = self.entries.get(encode_id(self._rel(src)))
+            shutil.move(src, dst)
+            for old, new in zip(_sidecars(src), _sidecars(dst)):
+                if os.path.exists(old):
+                    try:
+                        shutil.move(old, new)
+                    except OSError as e:
+                        logger.warning(f"移動附屬檔失敗 {old}: {e}")
+            if entry:                            # a default title follows the file name
+                meta = entry['meta']
+                if meta.get('title') == os.path.splitext(os.path.basename(src))[0]:
+                    meta['title'] = os.path.splitext(os.path.basename(dst))[0]
+                    media.save_meta(dst, meta)
+        logger.info(f"影片庫：{src} -> {dst}")
 
     def shutdown(self):
         self._pool.shutdown(wait=False, cancel_futures=True)

@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.0.1] - 2026-11-20 - Library Folder Tree
+### Added
+- Web library folder tree (`FolderTree.jsx`): browse folders, `＋ 新增` folder, drag videos / folders onto a folder to move them, right-click (or `⋯`) to rename / add sub folder / delete empty folder; right-click a video to open, rename, go to its folder or delete
+- Card / list view switch on the library page (remembered per browser)
+- API `/api/folders` (list / create / rename / delete), `/api/videos/{id}/rename`, `/api/move` (`Library.folders`, `create_folder`, `rename_folder`, `delete_folder`, `rename_video`, `move`); moved / renamed videos keep their hidden info, screenshots and `.720p_h265` copy; names are validated and videos still being processed can't be moved
+
 ## [3.0.0] - 2026-11-20 - Web Video Library
 ### Added
 - Web video library for watching and managing downloaded videos in a browser (Telegram and system settings stay in the Windows app): `library/` backend (aiohttp `LibraryServer` in `server.py`, `Library` scanner with 2 background workers in `store.py`, ffprobe info and 9 ffmpeg screenshots in `media.py`) and `frontend/` (React 18 + Vite 6 + Tailwind CSS 4; `npm run build` outputs to the gitignored `library/static`)
