@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fmtDuration } from '../api.js'
+import { fmtDuration, MEDIA } from '../api.js'
 
 const QUALITIES = [480, 720, 1080]
 
@@ -23,7 +23,7 @@ export default function Player({ video, startAt = 0, onTime }) {
   const [volume, setVolume] = useState(1)
   const [dragging, setDragging] = useState(null)
 
-  const src = mode === 'direct' ? `/media/${video.id}/file` : `/media/${video.id}/stream?t=${offset.toFixed(2)}&h=${quality}`
+  const src = mode === 'direct' ? `${MEDIA}/${video.id}/file` : `${MEDIA}/${video.id}/stream?t=${offset.toFixed(2)}&h=${quality}`
   const now = () => (mode === 'direct' ? ref.current?.currentTime || 0 : offset + (ref.current?.currentTime || 0))
 
   function seek(t) {

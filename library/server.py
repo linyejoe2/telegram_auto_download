@@ -1,11 +1,12 @@
 """
 library/server.py — aiohttp server for the web video library.
 
-  /api/...            JSON API (login, videos, tags, edit, delete, rescan)   — login required
-  /media/<id>/file    original file with HTTP range support (direct play)    — login required
-  /media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start seconds>    — login required
-  /media/<id>/shots/  auto screenshots                                       — login required
-  everything else     the React frontend (library/static, built by `npm run build` in frontend/)
+Everything lives under PREFIX (/library); "/" answers an empty page.
+  /library/api/...            JSON API (login, videos, tags, edit, delete, rescan)   — login required
+  /library/media/<id>/file    original file with HTTP range support (direct play)    — login required
+  /library/media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start seconds>    — login required
+  /library/media/<id>/shots/  auto screenshots                                       — login required
+  /library/...                the React frontend (library/static, built by `npm run build` in frontend/)
 
 Settings come from .env: WEB_PORT, WEB_HOST, WEB_PASSWORD_HASH, WEB_SECRET (see config.config).
 LibraryServer runs the app on its own event loop in a background thread (GUI) or inside asyncio (CLI).
@@ -29,6 +30,7 @@ from .store import Library, LibraryError
 logger = logging.getLogger(__name__)
 
 COOKIE = 'tad_session'
+PREFIX = '/library'          # the whole web app (frontend, API, media) lives under this path
 RESCAN_SECONDS = 5 * 60
 STREAM_HEIGHTS = (480, 720, 1080)
 _SHOT_RE = re.compile(r'^\d{2}\.jpg$')
@@ -48,6 +50,21 @@ def _client(request: web.Request) -> str:
         if forwarded:
             return forwarded.split(',')[0].strip()
     return remote
+
+
+def _session_tokens(request: web.Request):
+    """Every value of the session cookie: a browser can send two (an old one stored for path "/"
+    before the app moved to /library, and the current one), and request.cookies keeps only the last."""
+    for part in request.headers.get('Cookie', '').split(';'):
+        name, _, value = part.strip().partition('=')
+        if name == COOKIE and value:
+            yield value.strip('"')
+
+
+def _expire_root_cookie(response: web.StreamResponse):
+    """Delete the session cookie stored for path "/" by versions before the move to /library.
+    Added as a raw header: response.cookies holds one entry per name, already used for /library."""
+    response.headers.add('Set-Cookie', f'{COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict')
 
 
 def _is_https(request: web.Request) -> bool:
@@ -77,45 +94,51 @@ class LibraryServer:
     def build_app(self) -> web.Application:
         app = web.Application(middlewares=[self._security_middleware], client_max_size=1024 * 1024)
         r = app.router
-        r.add_post('/api/login', self.login)
-        r.add_post('/api/logout', self.logout)
-        r.add_get('/api/session', self.session)
-        r.add_get('/api/status', self.status)
-        r.add_get('/api/videos', self.list_videos)
-        r.add_get('/api/videos/{id}', self.get_video)
-        r.add_patch('/api/videos/{id}', self.update_video)
-        r.add_delete('/api/videos/{id}', self.delete_video)
-        r.add_post('/api/videos/{id}/screenshots', self.regenerate_shots)
-        r.add_get('/api/tags', self.tags)
-        r.add_get('/api/folders', self.list_folders)
-        r.add_post('/api/folders', self.create_folder)
-        r.add_post('/api/folders/rename', self.rename_folder)
-        r.add_post('/api/folders/delete', self.delete_folder)
-        r.add_post('/api/videos/{id}/rename', self.rename_video)
-        r.add_post('/api/videos/{id}/ungroup', self.ungroup_video)
-        r.add_post('/api/move', self.move)
-        r.add_post('/api/rescan', self.rescan)
-        r.add_get('/media/{id}/file', self.media_file)
-        r.add_get('/media/{id}/stream', self.media_stream)
-        r.add_get('/media/{id}/shots/{name}', self.media_shot)
-        r.add_get('/{tail:.*}', self.frontend)
+        r.add_post(PREFIX + '/api/login', self.login)
+        r.add_post(PREFIX + '/api/logout', self.logout)
+        r.add_get(PREFIX + '/api/session', self.session)
+        r.add_get(PREFIX + '/api/status', self.status)
+        r.add_get(PREFIX + '/api/videos', self.list_videos)
+        r.add_get(PREFIX + '/api/videos/{id}', self.get_video)
+        r.add_patch(PREFIX + '/api/videos/{id}', self.update_video)
+        r.add_delete(PREFIX + '/api/videos/{id}', self.delete_video)
+        r.add_post(PREFIX + '/api/videos/{id}/screenshots', self.regenerate_shots)
+        r.add_get(PREFIX + '/api/tags', self.tags)
+        r.add_get(PREFIX + '/api/folders', self.list_folders)
+        r.add_post(PREFIX + '/api/folders', self.create_folder)
+        r.add_post(PREFIX + '/api/folders/rename', self.rename_folder)
+        r.add_post(PREFIX + '/api/folders/delete', self.delete_folder)
+        r.add_post(PREFIX + '/api/videos/{id}/rename', self.rename_video)
+        r.add_post(PREFIX + '/api/videos/{id}/ungroup', self.ungroup_video)
+        r.add_post(PREFIX + '/api/move', self.move)
+        r.add_post(PREFIX + '/api/rescan', self.rescan)
+        r.add_get(PREFIX + '/media/{id}/file', self.media_file)
+        r.add_get(PREFIX + '/media/{id}/stream', self.media_stream)
+        r.add_get(PREFIX + '/media/{id}/shots/{name}', self.media_shot)
+        r.add_get('/', self.blank)
+        r.add_get(PREFIX, self.to_app)
+        r.add_get(PREFIX + '/{tail:.*}', self.frontend)
         return app
 
     @web.middleware
     async def _security_middleware(self, request: web.Request, handler):
         path = request.path
-        public = path in ('/api/login', '/api/session') or not path.startswith(('/api/', '/media/'))
-        if not public and not self.sessions.valid(request.cookies.get(COOKIE)):
+        public = path in (PREFIX + '/api/login', PREFIX + '/api/session') or \
+            not path.startswith((PREFIX + '/api/', PREFIX + '/media/'))
+        if not public and not self._authenticated(request):
             return web.json_response({'error': 'unauthorized'}, status=401)
         response = await handler(request)
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('X-Frame-Options', 'DENY')
         response.headers.setdefault('Referrer-Policy', 'no-referrer')
-        if path.startswith('/api/'):
+        if path.startswith(PREFIX + '/api/'):
             response.headers.setdefault('Cache-Control', 'no-store')
         return response
 
     # ── auth ──
+
+    def _authenticated(self, request: web.Request) -> bool:
+        return any(self.sessions.valid(token) for token in _session_tokens(request))
 
     async def login(self, request: web.Request):
         client = _client(request)
@@ -135,17 +158,19 @@ class LibraryServer:
         self.sessions.succeeded(client)
         response = web.json_response({'ok': True})
         response.set_cookie(COOKIE, self.sessions.issue(), max_age=30 * 24 * 3600, httponly=True,
-                            samesite='Strict', secure=_is_https(request), path='/')
+                            samesite='Strict', secure=_is_https(request), path=PREFIX)
+        _expire_root_cookie(response)
         logger.info(f"影片庫登入：{client}")
         return response
 
     async def logout(self, request: web.Request):
         response = web.json_response({'ok': True})
-        response.del_cookie(COOKIE, path='/')
+        response.del_cookie(COOKIE, path=PREFIX)
+        _expire_root_cookie(response)
         return response
 
     async def session(self, request: web.Request):
-        return web.json_response({'authenticated': self.sessions.valid(request.cookies.get(COOKIE))})
+        return web.json_response({'authenticated': self._authenticated(request)})
 
     # ── api ──
 
@@ -312,9 +337,16 @@ class LibraryServer:
                 await proc.wait()
         return response
 
+    async def blank(self, request: web.Request):
+        """The site root stays empty: the library is only at /library."""
+        return web.Response(text='', content_type='text/html')
+
+    async def to_app(self, request: web.Request):
+        raise web.HTTPFound(PREFIX + '/')
+
     async def frontend(self, request: web.Request):
         root = static_dir()
-        rel = request.match_info['tail']
+        rel = request.match_info['tail']           # path after /library/ (assets are built with base /library/)
         if rel:
             target = os.path.realpath(os.path.join(root, rel))
             if (os.path.normcase(target).startswith(os.path.normcase(os.path.realpath(root)) + os.sep)
@@ -332,7 +364,7 @@ class LibraryServer:
         self._runner = web.AppRunner(self.build_app(), access_log=None)
         await self._runner.setup()
         await web.TCPSite(self._runner, self.host, self.port).start()
-        logger.info(f"網頁影片庫已啟動：http://{self.host}:{self.port}")
+        logger.info(f"網頁影片庫已啟動：http://{self.host}:{self.port}{PREFIX}/")
         self._rescan_task = asyncio.create_task(self._rescan_loop())
 
     async def _rescan_loop(self):

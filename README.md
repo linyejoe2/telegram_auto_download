@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.1.0
+# Telegram Auto Download Bot v3.1.1
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -45,7 +45,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.1.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.1.1.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -190,7 +190,7 @@ Send `/files` (owner only; also in the Telegram command menu) to browse the down
 
 A browser app (v3.0.0) for watching and managing the videos in your downloads folder. Telegram and system settings stay in the Windows app.
 
-- **Setup:** open the GUI **Web Library** tab, set a password (at least 8 characters, stored only as a hash), choose the port (default 8765) and access (any location `0.0.0.0` / this PC only), then click **Start** (tick **Start on launch** to run it with the app; `main.py --cli` also starts it when `WEB_ENABLED=1`). **Open in Browser** or use the URLs shown in the tab, e.g. `http://localhost:8765`. Changing the password logs out every session; 5 wrong passwords lock that client for 15 minutes.
+- **Setup:** open the GUI **Web Library** tab, set a password (at least 8 characters, stored only as a hash), choose the port (default 8765) and access (any location `0.0.0.0` / this PC only), then click **Start** (tick **Start on launch** to run it with the app; `main.py --cli` also starts it when `WEB_ENABLED=1`). **Open in Browser** or use the URLs shown in the tab, e.g. `http://localhost:8765/library/` (v3.1.1: the library lives under `/library`; the site root `/` is an empty page). Changing the password logs out every session; 5 wrong passwords lock that client for 15 minutes.
 - **Remote access:** the library speaks plain HTTP, so for access from outside put it behind an HTTPS tunnel (Cloudflare Tunnel or Tailscale are recommended) or use port forwarding at your own risk.
 - **Versions (v3.1.0):** videos whose lengths differ by at most 3 s are compared on their first, middle and last screenshots (grayscale SSIM); if the mean similarity reaches the threshold (default 70 %, set under **Same-video similarity** in the Web Library tab) they are grouped as versions of one video. The library shows a group once (best quality, "N 個版本" badge); the video page has a 版本 box to switch 線路 (playback continues at the same time) and 「從群組移出」 to split a wrong match (never grouped again). 標題 / 主演 / 系列 are shared by the group. The whole library is checked when the web library starts; a new download that matches is grouped automatically and the bot sends a Telegram notice.
 - **Folder tree (v3.0.1):** the left side lists every folder with video counts; click to browse, `＋ 新增` adds a folder, drag a video or folder onto a folder to move it, right-click (or `⋯`) a folder to rename / add a sub folder / delete it (empty only) and right-click a video to open, rename, go to its folder or delete. Moved and renamed videos keep their info and screenshots.

@@ -53,7 +53,7 @@ async def main():
                                     similarity_threshold=web['similarity'],
                                     on_grouped=lambda text: bot.notify_owner_threadsafe(loop, text))
             await library.start()
-            print(f"🎬 Web library: http://localhost:{web['port']}")
+            print(f"🎬 Web library: http://localhost:{web['port']}/library/")
 
         # Run the bot
         await bot.run()

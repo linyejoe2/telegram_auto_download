@@ -21,6 +21,7 @@ from . import media, similarity
 logger = logging.getLogger(__name__)
 
 BACKGROUND_WORKERS = 2
+MEDIA_URL = '/library/media'   # matches server.PREFIX
 SETTLE_SECONDS = 90          # a file changed more recently may still be downloading / copying: wait
 _BAD_NAME_CHARS = set('<>:"/\\|?*')
 
@@ -234,7 +235,7 @@ class Library:
             'bit_rate': info.get('bit_rate'),
             'size': info.get('size') or self._size(entry['path']),
             'added': meta.get('added'),
-            'cover': f"/media/{vid}/shots/{meta['shots'][0]}" if meta.get('shots') else None,
+            'cover': f"{MEDIA_URL}/{vid}/shots/{meta['shots'][0]}" if meta.get('shots') else None,
             'ready': bool(meta.get('info') and meta.get('shots')),
             'error': entry.get('error'),
             'group': meta.get('group') or '',
@@ -251,7 +252,7 @@ class Library:
             data.update({
                 'source': meta.get('source') or '',
                 'info': info,
-                'shots': [f"/media/{vid}/shots/{s}" for s in meta.get('shots') or []],
+                'shots': [f"{MEDIA_URL}/{vid}/shots/{s}" for s in meta.get('shots') or []],
                 'direct': media.direct_playable(entry['path'], info),
                 'mime': media.mime_codecs(entry['path'], info),
                 'processing': vid in self._pending,

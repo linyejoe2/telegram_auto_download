@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.1.0"
+        self.version = "v3.1.1"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -267,14 +267,14 @@ class TelegramBotGUI:
 
     def _web_urls(self):
         port = self.web_port_var.get().strip() or '8765'
-        urls = [f"http://localhost:{port}"]
+        urls = [f"http://localhost:{port}/library/"]
         if self.web_host_var.get() == '0.0.0.0':
             try:
                 import socket
                 for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
                     ip = info[4][0]
-                    if not ip.startswith('127.') and f"http://{ip}:{port}" not in urls:
-                        urls.append(f"http://{ip}:{port}")
+                    if not ip.startswith('127.') and f"http://{ip}:{port}/library/" not in urls:
+                        urls.append(f"http://{ip}:{port}/library/")
             except Exception:
                 pass
         return urls

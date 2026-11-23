@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { api, fmtBitrate, fmtDuration, fmtSize, resolutionLabel } from '../api.js'
+import { api, fmtBitrate, fmtDuration, fmtSize, MEDIA, resolutionLabel } from '../api.js'
 import Player from '../components/Player.jsx'
 import TagInput from '../components/TagInput.jsx'
 
@@ -248,7 +248,7 @@ export default function VideoPage({ guard }) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <a href={`/media/${video.id}/file`} download={video.file} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">下載原檔</a>
+            <a href={`${MEDIA}/${video.id}/file`} download={video.file} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">下載原檔</a>
             <button onClick={regenerate} disabled={video.processing} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50">
               {video.processing ? '處理中…' : '重新產生截圖'}
             </button>

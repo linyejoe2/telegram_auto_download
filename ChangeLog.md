@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.1.1] - 2026-11-20 - Library Moved to /library
+### Changed
+- The web library (frontend, `/library/api`, `/library/media`) now lives under `/library` (`server.PREFIX`, vite `base`, router `basename`); `/` returns an empty page, `/library` redirects to `/library/`; GUI / CLI links point to `/library/`
+### Fixed
+- Login no longer fails when the browser still holds the old session cookie stored for `/`: every session cookie value is checked, and login / logout expire the old one
+
 ## [3.1.0] - 2026-11-20 - Similar Video Versions
 ### Added
 - Similar-video detection (`library/similarity.py`): videos whose lengths differ by at most 3 s are compared on screenshots 1, 5 and 9 (10 / 50 / 90 %) with grayscale SSIM (skimage-identical, OpenCV only); mean >= threshold (default 70 %, GUI "Same-video similarity", `SIMILARITY_THRESHOLD`) groups them as versions of one video

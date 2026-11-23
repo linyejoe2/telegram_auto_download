@@ -2,6 +2,11 @@
 
 export class Unauthorized extends Error {}
 
+// the app is served under /library (see library/server.py PREFIX and vite.config.js base)
+export const BASE = '/library'
+export const API = `${BASE}/api`
+export const MEDIA = `${BASE}/media`
+
 async function request(method, url, body) {
   const res = await fetch(url, {
     method,
@@ -9,30 +14,30 @@ async function request(method, url, body) {
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (res.status === 401 && url !== '/api/login') throw new Unauthorized()
+  if (res.status === 401 && url !== `${API}/login`) throw new Unauthorized()
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
   return data
 }
 
 export const api = {
-  session: () => request('GET', '/api/session'),
-  login: (password) => request('POST', '/api/login', { password }),
-  logout: () => request('POST', '/api/logout'),
-  videos: () => request('GET', '/api/videos'),
-  video: (id) => request('GET', `/api/videos/${id}`),
-  update: (id, fields) => request('PATCH', `/api/videos/${id}`, fields),
-  remove: (id) => request('DELETE', `/api/videos/${id}`),
-  regenerateShots: (id) => request('POST', `/api/videos/${id}/screenshots`),
-  tags: () => request('GET', '/api/tags'),
-  rescan: () => request('POST', '/api/rescan'),
-  folders: () => request('GET', '/api/folders'),
-  createFolder: (parent, name) => request('POST', '/api/folders', { parent, name }),
-  renameFolder: (path, name) => request('POST', '/api/folders/rename', { path, name }),
-  deleteFolder: (path) => request('POST', '/api/folders/delete', { path }),
-  renameVideo: (id, name) => request('POST', `/api/videos/${id}/rename`, { name }),
-  move: (videos, folders, dest) => request('POST', '/api/move', { videos, folders, dest }),
-  ungroup: (id) => request('POST', `/api/videos/${id}/ungroup`),
+  session: () => request('GET', `${API}/session`),
+  login: (password) => request('POST', `${API}/login`, { password }),
+  logout: () => request('POST', `${API}/logout`),
+  videos: () => request('GET', `${API}/videos`),
+  video: (id) => request('GET', `${API}/videos/${id}`),
+  update: (id, fields) => request('PATCH', `${API}/videos/${id}`, fields),
+  remove: (id) => request('DELETE', `${API}/videos/${id}`),
+  regenerateShots: (id) => request('POST', `${API}/videos/${id}/screenshots`),
+  tags: () => request('GET', `${API}/tags`),
+  rescan: () => request('POST', `${API}/rescan`),
+  folders: () => request('GET', `${API}/folders`),
+  createFolder: (parent, name) => request('POST', `${API}/folders`, { parent, name }),
+  renameFolder: (path, name) => request('POST', `${API}/folders/rename`, { path, name }),
+  deleteFolder: (path) => request('POST', `${API}/folders/delete`, { path }),
+  renameVideo: (id, name) => request('POST', `${API}/videos/${id}/rename`, { name }),
+  move: (videos, folders, dest) => request('POST', `${API}/move`, { videos, folders, dest }),
+  ungroup: (id) => request('POST', `${API}/videos/${id}/ungroup`),
 }
 
 // drag & drop payload between video items and folder tree nodes
