@@ -306,7 +306,9 @@ class Library:
                          if e['kind'] == 'photo' and os.path.dirname(e['rel']) == folder))
         ids = [i for _, i in photos]
         pos = ids.index(vid)
+        around = [pos + 1, pos - 1, pos + 2, pos - 2]          # preloaded by the photo page, nearest first
         return {'prev': ids[pos - 1] if pos > 0 else None, 'next': ids[pos + 1] if pos + 1 < len(ids) else None,
+                'preload': [ids[i] for i in around if 0 <= i < len(ids)],
                 'index': pos + 1, 'total': len(ids)}
 
     def _versions(self, vid: str, entry: dict) -> List[dict]:

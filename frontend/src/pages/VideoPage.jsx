@@ -15,6 +15,21 @@ function InfoRow({ label, children }) {
 
 const field = 'w-full rounded-lg bg-neutral-800 px-3 py-1.5 text-sm outline-none ring-1 ring-white/10 focus:ring-accent'
 
+// Photos: the details and the image files of the 2 photos on each side are loaded ahead, so
+// switching (buttons, ←/→, swipe) shows the next photo at once instead of a loading screen.
+const detailCache = new Map() // id -> detail JSON
+const preloaded = new Map() // id -> Image (kept so the browser doesn't drop the request)
+const CACHE_LIMIT = 40
+
+function remember(map, key, value) {
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > CACHE_LIMIT) map.delete(map.keys().next().value)
+}
+
+const formOf = (v) => ({ _id: v.id, title: v.title, actors: v.actors, series: v.series, source: v.source })
+const SWIPE_MIN = 60 // px a finger must travel to switch photo
+
 export default function VideoPage({ guard }) {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -31,12 +46,18 @@ export default function VideoPage({ guard }) {
   const [playFrom, setPlayFrom] = useState(null) // null = show screenshots, number = playing from there
   const [redl, setRedl] = useState(null) // broken file: null | 'busy' | { ok, text }
   const playTime = useRef(0) // where the player is, so switching version continues there
+  const currentId = useRef(id) // ignore answers for a photo the user already swiped past
+  const swipe = useRef(null) // touch in progress: { x, y, dx, dir }
+  const [dragX, setDragX] = useState(0)
 
   async function load() {
     try {
       const v = await api.video(id)
+      if (currentId.current !== id) return
+      remember(detailCache, id, v)
       setVideo(v)
-      setForm((f) => f ?? { title: v.title, actors: v.actors, series: v.series, source: v.source })
+      // keep unsaved edits while polling the same file
+      setForm((f) => (f && f._id === v.id ? f : formOf(v)))
       return v
     } catch (e) {
       try {
@@ -48,7 +69,11 @@ export default function VideoPage({ guard }) {
   }
 
   useEffect(() => {
-    setForm(null)
+    currentId.current = id
+    const cached = detailCache.get(id)
+    setVideo(cached || null)
+    setForm(cached ? formOf(cached) : null)
+    setDragX(0)
     setRedl(null)
     // switching version keeps playing at the same time
     setPlayFrom(location.state?.resume ?? null)
@@ -75,6 +100,49 @@ export default function VideoPage({ guard }) {
     navigate(`/v/${otherId}`, { replace: true, state: location.state })
   }
 
+  // photos: load the neighbors' details and image files ahead
+  useEffect(() => {
+    if (video?.kind !== 'photo') return
+    for (const nid of video.neighbors?.preload || []) {
+      if (!preloaded.has(nid)) {
+        const img = new Image()
+        img.src = `${MEDIA}/${nid}/file`
+        remember(preloaded, nid, img)
+      }
+      if (!detailCache.has(nid)) {
+        api.video(nid).then((d) => remember(detailCache, nid, d)).catch(() => {})
+      }
+    }
+  }, [video])
+
+  // photos on touch screens: drag sideways to switch (the image follows the finger)
+  function onTouchStart(e) {
+    swipe.current = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dir: null } : null
+    if (!swipe.current) setDragX(0) // second finger: pinch zoom, not a swipe
+  }
+
+  function onTouchMove(e) {
+    const s = swipe.current
+    if (!s || e.touches.length !== 1) return
+    const dx = e.touches[0].clientX - s.x
+    const dy = e.touches[0].clientY - s.y
+    if (!s.dir && Math.max(Math.abs(dx), Math.abs(dy)) > 8) s.dir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v'
+    if (s.dir !== 'h') return
+    s.dx = dx
+    const nav = video?.neighbors || {}
+    const edge = (dx > 0 && !nav.prev) || (dx < 0 && !nav.next)
+    setDragX(edge ? dx / 4 : dx) // resist at the first / last photo
+  }
+
+  function onTouchEnd() {
+    const s = swipe.current
+    swipe.current = null
+    const nav = video?.neighbors || {}
+    if (s?.dir === 'h' && s.dx <= -SWIPE_MIN && nav.next) goTo(nav.next)
+    else if (s?.dir === 'h' && s.dx >= SWIPE_MIN && nav.prev) goTo(nav.prev)
+    else setDragX(0)
+  }
+
   // screenshots / info still being generated: poll until ready
   useEffect(() => {
     if (!video?.processing && video?.ready) return
@@ -88,8 +156,9 @@ export default function VideoPage({ guard }) {
     setSaving(true)
     try {
       const v = await api.update(id, form)
+      remember(detailCache, id, v)
       setVideo(v)
-      setForm({ title: v.title, actors: v.actors, series: v.series, source: v.source })
+      setForm(formOf(v))
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       api.tags().then(setTags).catch(() => {})
@@ -122,7 +191,7 @@ export default function VideoPage({ guard }) {
     try {
       const v = await api.ungroup(id)
       setVideo(v)
-      setForm({ title: v.title, actors: v.actors, series: v.series, source: v.source })
+      setForm(formOf(v))
     } catch (err) {
       guard(err)
     }
@@ -149,6 +218,7 @@ export default function VideoPage({ guard }) {
     if (!window.confirm(`確定要刪除「${video.file}」嗎？\n${what}檔與它的資訊、截圖都會刪除，無法復原。\n（下載紀錄會保留，之後可在「下載紀錄」重新下載）`)) return
     try {
       await api.remove(id)
+      detailCache.clear() // neighbors of the other photos changed
       const next = video.neighbors?.next || video.neighbors?.prev // photos: continue with the next one
       if (next) goTo(next)
       else navigate(backTo, { replace: true })
@@ -206,14 +276,29 @@ export default function VideoPage({ guard }) {
             </div>
           )}
           {photo ? (
-            <div className="relative flex min-h-[40vh] items-center justify-center overflow-hidden rounded-xl bg-black">
-              <a href={fileUrl} target="_blank" rel="noreferrer" title="開啟原圖">
-                <img key={video.id} src={fileUrl} alt={video.title} className="max-h-[80vh] w-auto max-w-full object-contain" />
+            <div
+              className="relative flex min-h-[40vh] select-none items-center justify-center overflow-hidden rounded-xl bg-black"
+              style={{ touchAction: 'pan-y pinch-zoom' }}
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              onTouchCancel={onTouchEnd}
+            >
+              <a
+                href={fileUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="開啟原圖"
+                draggable={false}
+                style={{ transform: `translateX(${dragX}px)` }}
+                className={swipe.current ? '' : 'transition-transform duration-200'}
+              >
+                <img key={video.id} src={fileUrl} alt={video.title} draggable={false} className="max-h-[80vh] w-auto max-w-full object-contain" />
               </a>
               {nav.prev && (
                 <button
                   onClick={() => goTo(nav.prev)}
-                  className="absolute left-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80"
+                  className="absolute left-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80 pointer-coarse:hidden"
                   aria-label="上一張"
                   title="上一張（←）"
                 >
@@ -223,7 +308,7 @@ export default function VideoPage({ guard }) {
               {nav.next && (
                 <button
                   onClick={() => goTo(nav.next)}
-                  className="absolute right-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80"
+                  className="absolute right-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80 pointer-coarse:hidden"
                   aria-label="下一張"
                   title="下一張（→）"
                 >
@@ -233,6 +318,7 @@ export default function VideoPage({ guard }) {
               {nav.total > 1 && (
                 <span className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-xs tabular-nums">
                   {nav.index} / {nav.total}
+                  <span className="hidden pointer-coarse:inline"> · 左右滑動切換</span>
                 </span>
               )}
             </div>

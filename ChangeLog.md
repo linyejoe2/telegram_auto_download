@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.3.3] - 2026-11-23 - Photo Swipe & Preload
+### Added
+- Photo page on touch screens: swipe left / right to switch photo (image follows the finger, springs back under 60 px; ‹ › buttons hidden, desktop keeps buttons and ←/→) (`VideoPage.jsx`)
+### Changed
+- Photo page preloads the details and images of the 2 next and 2 previous photos (`library/store.py` `_neighbors()` returns `preload`), so switching shows the photo at once instead of "載入中…"
+
 ## [3.3.2] - 2026-11-23 - Clean Empty Files
 ### Added
 - Windows app Database tab: "Clean Empty Files" button (`src/ui.py` `clean_empty_files()`) scans for 0-byte files with no source link, shows the count and first 15 paths, asks for confirmation (cannot be undone), deletes them and reports the result
