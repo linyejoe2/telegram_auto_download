@@ -116,6 +116,8 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/videos/{id}/ungroup', self.ungroup_video)
         r.add_post(PREFIX + '/api/videos/{id}/redownload', self.redownload_video)
         r.add_post(PREFIX + '/api/move', self.move)
+        r.add_post(PREFIX + '/api/batch/update', self.batch_update)
+        r.add_post(PREFIX + '/api/batch/delete', self.batch_delete)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
         r.add_get(PREFIX + '/api/history', self.history)
         r.add_post(PREFIX + '/api/history/redownload', self.redownload)
@@ -306,6 +308,31 @@ class LibraryServer:
         videos = [str(v) for v in body.get('videos') or [] if isinstance(v, str)]
         folders = [str(f) for f in body.get('folders') or [] if isinstance(f, str)]
         result, error = await self._run(self.library.move, videos, folders, body.get('dest', ''))
+        return error or web.json_response(result)
+
+    @staticmethod
+    def _strings(value) -> list:
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+    async def batch_update(self, request: web.Request):
+        """Multi-select edit: {ids, add_actors, remove_actors, series?} (series '' clears, absent = unchanged)."""
+        body = await self._body(request)
+        ids = self._strings(body.get('ids'))
+        if not ids:
+            return web.json_response({'error': '沒有選取任何項目'}, status=400)
+        series = body.get('series')
+        result, error = await self._run(self.library.update_many, ids, self._strings(body.get('add_actors')),
+                                        self._strings(body.get('remove_actors')),
+                                        series if isinstance(series, str) else None)
+        return error or web.json_response(result)
+
+    async def batch_delete(self, request: web.Request):
+        """Multi-select delete: {ids} -> {deleted, failed: [{name, error}]}."""
+        body = await self._body(request)
+        ids = self._strings(body.get('ids'))
+        if not ids:
+            return web.json_response({'error': '沒有選取任何項目'}, status=400)
+        result, error = await self._run(self.library.delete_many, ids)
         return error or web.json_response(result)
 
     async def rescan(self, request: web.Request):

@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.3.4] - 2026-11-23 - Multi-select Delete & Edit
+### Added
+- Web library multi-select: `☑ 選取` button on the filter row, click / Shift+click range / Ctrl(⌘)+click to select videos and photos; bottom action bar with 全選, 清除選取, 🏷 編輯主演 / 系列, 🗑 刪除, 完成 (keys: Esc, Ctrl/⌘+A, Delete); dragging a selected item to a folder moves all selected items (`Library.jsx`, `VideoCard.jsx`)
+- Bulk edit dialog (`Dialogs.jsx` `BulkEditDialog`): add 主演 to all selected items, tap an existing 主演 to remove it, keep / set / clear 系列; bulk delete asks for confirmation and reports failures
+- `POST /library/api/batch/update` and `POST /library/api/batch/delete` (`library/store.py` `update_many()`, `delete_many()`, `_apply()` shared with `update()`); deleted items keep their download record in `.tad/deleted.json` like a single delete
+
 ## [3.3.3] - 2026-11-23 - Photo Swipe & Preload
 ### Added
 - Photo page on touch screens: swipe left / right to switch photo (image follows the finger, springs back under 60 px; ‹ › buttons hidden, desktop keeps buttons and ←/→) (`VideoPage.jsx`)

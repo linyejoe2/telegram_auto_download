@@ -1,14 +1,22 @@
 import { Link } from 'react-router-dom'
 import { dimensions, fmtBitrate, fmtDuration, fmtSize, resolutionLabel, setDragItems } from '../api.js'
 
-// shared by the card and list views: drag to a folder to move, right-click for rename / delete
-function itemProps(video, onMenu) {
+// shared by the card and list views: drag to a folder to move (all selected items when this one is
+// selected), right-click for rename / delete; in select mode a click toggles the item, Ctrl/⌘/Shift-click
+// always selects
+function itemProps(video, { onMenu, selecting, onSelect, dragIds }) {
   return {
     draggable: true,
-    onDragStart: (e) => setDragItems(e, { videos: [video.id], folders: [] }),
+    onDragStart: (e) => setDragItems(e, { videos: dragIds?.length ? dragIds : [video.id], folders: [] }),
     onContextMenu: (e) => {
       e.preventDefault()
       onMenu(e.clientX, e.clientY, video)
+    },
+    onClick: (e) => {
+      if (onSelect && (selecting || e.ctrlKey || e.metaKey || e.shiftKey)) {
+        e.preventDefault()
+        onSelect(video, e)
+      }
     },
   }
 }
@@ -19,26 +27,50 @@ function placeholder(video) {
   return video.kind === 'photo' ? '產生縮圖中…' : '產生截圖中…'
 }
 
-export default function VideoCard({ video, search, onMenu }) {
+function Check({ on, className = '' }) {
+  return (
+    <span
+      aria-hidden
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-2 ${
+        on ? 'bg-accent text-white ring-accent' : 'bg-black/50 text-transparent ring-white/70'
+      } ${className}`}
+    >
+      ✓
+    </span>
+  )
+}
+
+export default function VideoCard({ video, search, onMenu, selecting, selected, onSelect, dragIds }) {
   const photo = video.kind === 'photo'
   const res = photo ? null : resolutionLabel(video.width, video.height)
+  const badge = selecting ? 'left-10' : 'left-2'
   return (
     <Link
       to={`/v/${video.id}`}
       state={{ back: search }}
-      {...itemProps(video, onMenu)}
-      className="group block overflow-hidden rounded-xl bg-neutral-900 ring-1 ring-white/5 transition hover:ring-accent/60"
+      aria-selected={selecting ? !!selected : undefined}
+      {...itemProps(video, { onMenu, selecting, onSelect, dragIds })}
+      className={`group block overflow-hidden rounded-xl bg-neutral-900 ring-1 transition ${
+        selected ? 'ring-2 ring-accent' : 'ring-white/5 hover:ring-accent/60'
+      }`}
     >
       <div className="relative aspect-video bg-neutral-800">
         {video.cover ? (
-          <img src={video.cover} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+          <img
+            src={video.cover}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            className={`h-full w-full object-cover transition group-hover:scale-[1.03] ${selected ? 'opacity-80' : ''}`}
+          />
         ) : (
           <div className="flex h-full items-center justify-center px-3 text-center text-xs text-neutral-500" title={video.error || undefined}>
             {placeholder(video)}
           </div>
         )}
-        {res && <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium">{res}</span>}
-        {photo && <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px]" aria-label="圖片">🖼</span>}
+        {selecting && <Check on={selected} className="absolute left-2 top-2" />}
+        {res && <span className={`absolute ${badge} top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium`}>{res}</span>}
+        {photo && <span className={`absolute ${badge} top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px]`} aria-label="圖片">🖼</span>}
         {video.versions > 1 && (
           <span className="absolute right-2 top-2 rounded bg-accent/90 px-1.5 py-0.5 text-[11px] font-medium">{video.versions} 個版本</span>
         )}
@@ -63,18 +95,22 @@ export default function VideoCard({ video, search, onMenu }) {
   )
 }
 
-export function VideoRow({ video, search, onMenu }) {
+export function VideoRow({ video, search, onMenu, selecting, selected, onSelect, dragIds }) {
   const photo = video.kind === 'photo'
   const quality = photo ? dimensions(video.width, video.height) : resolutionLabel(video.width, video.height)
   return (
     <Link
       to={`/v/${video.id}`}
       state={{ back: search }}
-      {...itemProps(video, onMenu)}
-      className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5 md:grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_88px_64px_80px]"
+      aria-selected={selecting ? !!selected : undefined}
+      {...itemProps(video, { onMenu, selecting, onSelect, dragIds })}
+      className={`grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 rounded-lg px-2 py-1.5 md:grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_88px_64px_80px] ${
+        selected ? 'bg-accent/20 ring-1 ring-accent/60' : 'hover:bg-white/5'
+      }`}
     >
-      <div className="aspect-video overflow-hidden rounded bg-neutral-800">
+      <div className="relative aspect-video overflow-hidden rounded bg-neutral-800">
         {video.cover && <img src={video.cover} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
+        {selecting && <Check on={selected} className="absolute left-1 top-1 h-5 w-5 text-xs" />}
       </div>
       <div className="min-w-0">
         <p className="truncate text-sm font-medium" title={video.title}>

@@ -352,25 +352,64 @@ class Library:
 
     def update(self, vid: str, fields: dict) -> Optional[dict]:
         with self._lock:
-            entry = self.entries.get(vid)
-            if not entry:
+            if not self._apply(vid, fields):
                 return None
-            meta = entry['meta']
-            if 'title' in fields:
-                meta['title'] = str(fields['title'] or '').strip()[:300] or os.path.splitext(os.path.basename(entry['path']))[0]
-            if 'actors' in fields:
-                meta['actors'] = media.clean_tags(fields['actors'])
-            if 'series' in fields:
-                meta['series'] = str(fields['series'] or '').strip()[:200]
-            if 'source' in fields:
-                meta['source'] = str(fields['source'] or '').strip()[:2000]
-            self._save(entry)
-            if meta.get('group'):                # title / actors / series are shared by all versions
-                for mid, m in self._group_members(meta['group']):
-                    if mid != vid:
-                        m['meta'].update({k: meta[k] for k in ('title', 'actors', 'series')})
-                        self._save(m)
         return self.detail(vid)
+
+    def update_many(self, vids: List[str], add_actors=(), remove_actors=(), series=None) -> dict:
+        """Bulk edit of the selected items: add / remove 主演, set 系列 ('' clears it, None leaves it)."""
+        add = media.clean_tags(add_actors)
+        drop = {a.lower() for a in media.clean_tags(remove_actors)}
+        updated, missing = 0, 0
+        with self._lock:
+            for vid in dict.fromkeys(str(v) for v in vids or []):
+                entry = self.entries.get(vid)
+                if not entry:
+                    missing += 1
+                    continue
+                kept = [a for a in entry['meta'].get('actors') or [] if a.lower() not in drop]
+                fields = {'actors': kept + add}
+                if series is not None:
+                    fields['series'] = series
+                self._apply(vid, fields)
+                updated += 1
+        return {'updated': updated, 'missing': missing}
+
+    def delete_many(self, vids: List[str]) -> dict:
+        """Delete several items (same as delete() for each); returns deleted count / failed."""
+        deleted, failed = 0, []
+        for vid in dict.fromkeys(str(v) for v in vids or []):
+            entry = self.entries.get(vid)
+            name = os.path.basename(entry['rel']) if entry else vid
+            try:
+                if not self.delete(vid):
+                    raise LibraryError('找不到檔案', 404)
+                deleted += 1
+            except (LibraryError, OSError) as e:
+                failed.append({'name': name, 'error': getattr(e, 'strerror', None) or str(e)})
+        return {'deleted': deleted, 'failed': failed}
+
+    def _apply(self, vid: str, fields: dict) -> bool:
+        """Write title / actors / series / source to the sidecar (and the other versions); caller holds the lock."""
+        entry = self.entries.get(vid)
+        if not entry:
+            return False
+        meta = entry['meta']
+        if 'title' in fields:
+            meta['title'] = str(fields['title'] or '').strip()[:300] or os.path.splitext(os.path.basename(entry['path']))[0]
+        if 'actors' in fields:
+            meta['actors'] = media.clean_tags(fields['actors'])
+        if 'series' in fields:
+            meta['series'] = str(fields['series'] or '').strip()[:200]
+        if 'source' in fields:
+            meta['source'] = str(fields['source'] or '').strip()[:2000]
+        self._save(entry)
+        if meta.get('group'):                # title / actors / series are shared by all versions
+            for mid, m in self._group_members(meta['group']):
+                if mid != vid:
+                    m['meta'].update({k: meta[k] for k in ('title', 'actors', 'series') if k in meta})
+                    self._save(m)
+        return True
 
     def delete(self, vid: str) -> bool:
         with self._lock:

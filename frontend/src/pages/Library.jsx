@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, storedKind } from '../api.js'
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
-import { ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
+import { BulkEditDialog, ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
 
 const SORTS = {
   added: { label: '最新加入', fn: (a, b) => (b.added || 0) - (a.added || 0) },
@@ -60,6 +60,10 @@ export default function Library({ guard, onLogout }) {
   const [dialog, setDialog] = useState(null) // PromptDialog props
   const [toast, setToast] = useState(null)
   const [sidebar, setSidebar] = useState(false) // mobile drawer
+  const [selecting, setSelecting] = useState(false) // multi-select mode
+  const [selected, setSelected] = useState(() => new Set()) // ids
+  const [bulk, setBulk] = useState(false) // BulkEditDialog open
+  const anchor = useRef(null) // last clicked item, start of a Shift-click range
   const toastTimer = useRef(null)
   const [params, setParams] = useSearchParams() // filters live in the URL so "back" keeps them
 
@@ -233,11 +237,89 @@ export default function Library({ guard, onLogout }) {
     setMenu({ x, y, items })
   }
 
+  // ── multi-select ──
+
+  function select(video, e) {
+    setSelecting(true)
+    const range = e?.shiftKey && anchor.current
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (range) {
+        const ids = shown.map((v) => v.id)
+        const a = ids.indexOf(anchor.current)
+        const b = ids.indexOf(video.id)
+        if (a >= 0 && b >= 0) {
+          for (const id of ids.slice(Math.min(a, b), Math.max(a, b) + 1)) next.add(id)
+          return next
+        }
+      }
+      if (next.has(video.id)) next.delete(video.id)
+      else next.add(video.id)
+      return next
+    })
+    if (!range) anchor.current = video.id
+  }
+
+  function exitSelect() {
+    setSelecting(false)
+    setSelected(new Set())
+    anchor.current = null
+  }
+
+  const selectAll = () => setSelected(new Set(shown.map((v) => v.id)))
+
+  function describe(items) {
+    const photos = items.filter((v) => v.kind === 'photo').length
+    return [items.length - photos && `${items.length - photos} 部影片`, photos && `${photos} 張圖片`].filter(Boolean).join('、')
+  }
+
+  async function deleteSelected(items = picked) {
+    if (!items.length) return
+    const multi = items.filter((v) => v.versions > 1).length
+    const lines = [
+      `確定要刪除選取的 ${describe(items)} 嗎？`,
+      '檔案與它們的資訊、截圖都會刪除，無法復原。',
+      multi ? `其中 ${multi} 個有多個版本，只會刪除顯示的那個版本。` : '',
+      '（下載紀錄會保留，之後可在「下載紀錄」重新下載）',
+    ]
+    if (!window.confirm(lines.filter(Boolean).join('\n'))) return
+    setBusy(true)
+    const result = await act(() => api.batchDelete(items.map((v) => v.id)))
+    setBusy(false)
+    if (!result) return
+    if (result.failed.length) {
+      const shownErrors = result.failed.slice(0, 5).map((f) => `${f.name}：${f.error}`)
+      if (result.failed.length > 5) shownErrors.push(`…另外 ${result.failed.length - 5} 個`)
+      notify(`已刪除 ${result.deleted} 個，${result.failed.length} 個失敗：\n${shownErrors.join('\n')}`, true)
+    } else notify(`已刪除 ${result.deleted} 個項目`)
+  }
+
+  async function bulkUpdate(changes) {
+    const result = await api.batchUpdate(picked.map((v) => v.id), changes)
+    setBulk(false)
+    notify(`已更新 ${result.updated} 個項目的資訊`)
+    await load()
+  }
+
   function videoMenu(x, y, video) {
+    if (selected.has(video.id) && picked.length > 1) {
+      setMenu({
+        x,
+        y,
+        items: [
+          { label: `🏷 編輯已選 ${picked.length} 個的主演 / 系列`, onClick: () => setBulk(true) },
+          { label: '✖ 取消選取', onClick: exitSelect },
+          '-',
+          { label: `🗑 刪除已選 ${picked.length} 個`, danger: true, onClick: () => deleteSelected() },
+        ],
+      })
+      return
+    }
     setMenu({
       x,
       y,
       items: [
+        { label: selected.has(video.id) ? '☐ 取消選取' : '☑ 選取', onClick: () => select(video) },
         { label: video.kind === 'photo' ? '🖼 開啟' : '▶ 開啟', onClick: () => navigate(`/v/${video.id}`, { state: { back: params.toString() } }) },
         { label: '✏️ 重新命名', onClick: () => renameVideo(video) },
         { label: '📂 前往所在資料夾', onClick: () => setParam('folder', video.folder) },
@@ -271,6 +353,38 @@ export default function Library({ guard, onLogout }) {
     for (const v of Object.values(best)) items.push({ ...v, versions: groupSize[v.group] })
     return items.sort(SORTS[sort]?.fn || SORTS.added.fn)
   }, [videos, q, actor, series, folder, sort])
+
+  // only what is on screen can be selected: filtering / deleting drops the rest
+  const picked = useMemo(() => shown.filter((v) => selected.has(v.id)), [shown, selected])
+  const pickedIds = useMemo(() => picked.map((v) => v.id), [picked])
+  useEffect(() => {
+    if (picked.length !== selected.size) setSelected(new Set(pickedIds))
+  }, [picked])
+
+  // select mode keys: Esc ends, Ctrl/⌘+A selects all, Delete deletes
+  useEffect(() => {
+    if (!selecting) return
+    const onKey = (e) => {
+      if (dialog || bulk || menu || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return
+      if (e.key === 'Escape') exitSelect()
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        selectAll()
+      } else if (e.key === 'Delete' && picked.length) deleteSelected()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selecting, shown, picked, dialog, bulk, menu])
+
+  const itemProps = (v) => ({
+    video: v,
+    search: params.toString(),
+    onMenu: videoMenu,
+    selecting,
+    selected: selected.has(v.id),
+    onSelect: select,
+    dragIds: selected.has(v.id) ? pickedIds : undefined,
+  })
 
   const filtered = q || actor || series || folder
   // folder counts of what is shown (影片 / 圖片 / both)
@@ -307,7 +421,7 @@ export default function Library({ guard, onLogout }) {
         </div>
       )}
 
-      <main className="min-w-0 flex-1 px-4 pb-16">
+      <main className={`min-w-0 flex-1 px-4 ${selecting ? 'pb-36' : 'pb-16'}`}>
         <header className="sticky top-0 z-10 -mx-4 mb-4 space-y-3 bg-neutral-950/90 px-4 py-3 backdrop-blur">
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebar(true)} className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm lg:hidden" aria-label="資料夾">
@@ -365,6 +479,14 @@ export default function Library({ guard, onLogout }) {
             >
               📜 下載紀錄
             </button>
+            <button
+              onClick={() => (selecting ? exitSelect() : setSelecting(true))}
+              aria-pressed={selecting}
+              className={`rounded-lg px-3 py-1.5 text-sm ${selecting ? 'bg-accent/80 text-white' : 'bg-neutral-800 hover:bg-neutral-700'}`}
+              title="選取多個項目來一起刪除或編輯主演 / 系列（也可以 Ctrl / Shift + 點選）"
+            >
+              ☑ 選取
+            </button>
             <input
               value={q}
               onChange={(e) => setParam('q', e.target.value)}
@@ -405,7 +527,7 @@ export default function Library({ guard, onLogout }) {
         ) : view === 'grid' ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
             {shown.map((v) => (
-              <VideoCard key={v.id} video={v} search={params.toString()} onMenu={videoMenu} />
+              <VideoCard key={v.id} {...itemProps(v)} />
             ))}
           </div>
         ) : (
@@ -426,17 +548,59 @@ export default function Library({ guard, onLogout }) {
               <span className="text-right">大小</span>
             </div>
             {shown.map((v) => (
-              <VideoRow key={v.id} video={v} search={params.toString()} onMenu={videoMenu} />
+              <VideoRow key={v.id} {...itemProps(v)} />
             ))}
           </div>
         )}
       </main>
 
+      {selecting && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-neutral-900/95 px-4 py-2.5 backdrop-blur lg:left-64">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium tabular-nums">已選 {picked.length} 個</span>
+            <button onClick={selectAll} disabled={!shown.length || picked.length === shown.length} className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40">
+              全選 ({shown.length})
+            </button>
+            {picked.length > 0 && (
+              <button onClick={() => setSelected(new Set())} className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700">
+                清除選取
+              </button>
+            )}
+            <div className="ml-auto flex gap-2">
+              <button onClick={() => setBulk(true)} disabled={!picked.length} className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40">
+                🏷 編輯主演 / 系列
+              </button>
+              <button
+                onClick={() => deleteSelected()}
+                disabled={!picked.length || busy}
+                className="rounded-lg bg-red-900/70 px-3 py-1.5 text-red-100 hover:bg-red-800 disabled:opacity-40"
+              >
+                🗑 刪除
+              </button>
+              <button onClick={exitSelect} className="rounded-lg bg-accent px-3 py-1.5 font-medium hover:bg-accent-hover">
+                完成
+              </button>
+            </div>
+          </div>
+          <p className="mt-1 hidden text-xs text-neutral-500 md:block">
+            點選切換 · Shift + 點選選取範圍 · Ctrl + A 全選 · Delete 刪除 · Esc 結束 · 拖曳已選的項目到左側資料夾可一起移動
+          </p>
+        </div>
+      )}
+      {bulk && picked.length > 0 && (
+        <BulkEditDialog
+          items={picked}
+          actorSuggestions={tags.actors.map((a) => a.name)}
+          seriesSuggestions={tags.series.map((s) => s.name)}
+          onSubmit={bulkUpdate}
+          onCancel={() => setBulk(false)}
+        />
+      )}
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {dialog && <PromptDialog {...dialog} onCancel={() => setDialog(null)} />}
       {toast && (
         <div
-          className={`fixed bottom-4 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 whitespace-pre-line rounded-lg px-4 py-2 text-sm shadow-xl ${
+          className={`fixed ${selecting ? 'bottom-28 md:bottom-24' : 'bottom-4'} left-1/2 z-50 max-w-[90vw] -translate-x-1/2 whitespace-pre-line rounded-lg px-4 py-2 text-sm shadow-xl ${
             toast.error ? 'bg-red-900 text-red-100' : 'bg-neutral-800 text-neutral-100'
           }`}
         >
