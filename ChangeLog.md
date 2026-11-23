@@ -1,5 +1,10 @@
 # ChangeLog
 
+## [3.3.2] - 2026-11-23 - Clean Empty Files
+### Added
+- Windows app Database tab: "Clean Empty Files" button (`src/ui.py` `clean_empty_files()`) scans for 0-byte files with no source link, shows the count and first 15 paths, asks for confirmation (cannot be undone), deletes them and reports the result
+- `src/records.py` `DownloadRecords.empty_unsourced_files()` (skips files modified in the last 10 minutes and hidden folders) and `delete_files()` (removes the hidden sidecars; a record without a source link moves to `deleted.json`)
+
 ## [3.3.1] - 2026-11-23 - Re-download Broken Files
 ### Added
 - Item page of a broken video / photo (e.g. 檔案不完整或已損毀) shows how its source will be found and a ⬇ 重新下載 button (`POST /library/api/videos/{id}/redownload`, `src/records.py` `plan_redownload()`: own record, a deleted record with the same file name, or the Telegram message id parsed from the file name searched in the channels of recorded files)

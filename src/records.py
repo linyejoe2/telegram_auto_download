@@ -485,6 +485,41 @@ class DownloadRecords:
         except (ImportError, OSError):
             pass
 
+    def empty_unsourced_files(self, min_age: float = 600) -> List[str]:
+        """0-byte files in the downloads folder without a source link: no download record that gives
+        one and no 來源 typed in the web library. Files changed in the last `min_age` seconds are
+        skipped (a download that just started can still be 0 bytes)."""
+        self._ensure()
+        from src.file_viewer import source_link
+        now, found = time.time(), []
+        for folder, names, _ in self._walk(self.root):
+            for name in names:
+                path = os.path.join(folder, name)
+                try:
+                    stat = os.stat(path)
+                except OSError:
+                    continue
+                if stat.st_size != 0 or now - stat.st_mtime < min_age:
+                    continue
+                sidecar = media.read_sidecar(path)
+                if str(sidecar.get('source') or '').strip() or source_link(self.find_download(path)):
+                    continue
+                found.append(path)
+        return sorted(found, key=str.lower)
+
+    def delete_files(self, paths: Iterable[str]) -> Tuple[int, List[str]]:
+        """Delete files with their hidden sidecars; returns (deleted count, error texts)."""
+        deleted, errors = 0, []
+        for path in paths:
+            try:
+                os.remove(path)
+                self.forget_file(path)
+                deleted += 1
+            except OSError as e:
+                errors.append(f"{self._rel(path)}: {e.strerror or e}")
+        logger.info(f"清除 0 位元組且沒有來源的檔案：刪除 {deleted} 個，失敗 {len(errors)} 個")
+        return deleted, errors
+
     def file_moved(self, src: str, dst: str):
         """A file was moved / renamed together with its sidecars."""
         src, dst = os.path.abspath(src), os.path.abspath(dst)

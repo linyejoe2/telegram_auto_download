@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.3.1"
+        self.version = "v3.3.2"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -487,7 +487,57 @@ class TelegramBotGUI:
         
         ttk.Button(downloads_controls, text="Refresh Downloads", command=self.refresh_downloads).pack(side=tk.LEFT)
         ttk.Button(downloads_controls, text="Open File Location", command=self.open_file_location).pack(side=tk.LEFT, padx=5)
-        
+        self.clean_empty_button = ttk.Button(downloads_controls, text="Clean Empty Files", command=self.clean_empty_files)
+        self.clean_empty_button.pack(side=tk.LEFT, padx=5)
+
+    def clean_empty_files(self):
+        """Find 0-byte files without a source link in the downloads folder, confirm, delete (in the background)."""
+        self.clean_empty_button.config(state=tk.DISABLED, text="Scanning...")
+
+        def done():
+            self.clean_empty_button.config(state=tk.NORMAL, text="Clean Empty Files")
+
+        def scan():
+            try:
+                records = DownloadRecords()
+                paths = records.empty_unsourced_files()
+                root = records.root
+            except Exception as e:
+                logging.error(f"Scanning for empty files failed: {e}")
+                self.root.after(0, lambda: (done(), messagebox.showerror("Error", f"Scan failed: {e}")))
+                return
+            self.root.after(0, lambda: confirm(paths, root))
+
+        def confirm(paths, root):
+            if not paths:
+                done()
+                messagebox.showinfo("Clean Empty Files", "No 0-byte files without a source link were found.")
+                return
+            shown = "\n".join(os.path.relpath(p, root) for p in paths[:15])
+            more = f"\n... and {len(paths) - 15} more" if len(paths) > 15 else ""
+            if not messagebox.askyesno(
+                    "Clean Empty Files",
+                    f"Found {len(paths)} file(s) of 0 bytes without a source link:\n\n{shown}{more}\n\n"
+                    "Delete them? This cannot be undone."):
+                done()
+                return
+            self.clean_empty_button.config(text="Deleting...")
+            threading.Thread(target=delete, args=(paths,), daemon=True).start()
+
+        def delete(paths):
+            deleted, errors = DownloadRecords().delete_files(paths)
+
+            def report():
+                done()
+                text = f"Deleted {deleted} file(s)."
+                if errors:
+                    text += f"\n\nCould not delete {len(errors)}:\n" + "\n".join(errors[:10])
+                (messagebox.showwarning if errors else messagebox.showinfo)("Clean Empty Files", text)
+                self.refresh_downloads()
+            self.root.after(0, report)
+
+        threading.Thread(target=scan, daemon=True).start()
+
     def sort_by_column(self, col):
         # Get all rows
         data = [(self.downloads_tree.set(child, col), child) for child in self.downloads_tree.get_children('')]
