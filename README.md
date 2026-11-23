@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.1.1
+# Telegram Auto Download Bot v3.2.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
 
@@ -16,7 +16,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
   Interactive inline keyboard buttons to browse and choose download location, with previous-path quick-select.
 
 - **🗃️ SQLite Database**  
-  Tracks download history and prevents duplicates.
+  Tracks download history and prevents duplicates. Stored inside the downloads folder (`<DOWNLOADS_PATH>/.tad/downloads.db`, v3.2.0), so history and library data travel with the folder.
 
 - **⚡ High Performance**  
   Concurrent downloads (up to 5), real-time metrics, and progress display.
@@ -45,7 +45,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.1.1.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.2.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -65,6 +65,7 @@ API_ID=your_api_id
 API_HASH=your_api_hash
 PHONE_NUMBER=+1234567890
 BOT_TOKEN=your_bot_token
+DOWNLOADS_PATH=downloads # optional: downloads folder (default <app dir>/downloads); the database is kept in <DOWNLOADS_PATH>/.tad/ (v3.2.0)
 STARTUP_SCAN_COUNT=30   # optional: messages checked at startup (0 = off)
 WEB_ENABLED=1           # optional: start the web video library with the bot (v3.0.0)
 SIMILARITY_THRESHOLD=70 # optional: % similarity at which same-length videos are grouped as versions (v3.1.0)
@@ -198,6 +199,7 @@ A browser app (v3.0.0) for watching and managing the videos in your downloads fo
 - **Video page:** cover with play button and a 3x3 screenshot grid (click a screenshot to play from there); edit 標題 / 主演 (multi-select tags) / 系列 / 來源 (auto-filled from the download record); Video Info (size, bit rate, bit depth, codec, fps, audio, duration, playback mode, location); download the original, regenerate screenshots, delete (with confirmation).
 - **Playback:** the original file is played when the browser supports it; otherwise (or if it fails) the server transcodes live with ffmpeg to H.264/AAC with seek, ±10s, volume, 480/720/1080p, fullscreen and keys Space / ←/→ / F. Safari/iOS cannot play the live transcode.
 - **Where data is stored:** next to each video as hidden files `.<file>.meta.json` (title, actors, series, source, cached info) and `.<file>.shots/01.jpg-09.jpg`; the chat `/files` viewer skips them. Deleting from the web also removes the video, these files and the hidden `.720p_h265` copy. The downloads folder is rescanned every 5 minutes.
+- **Open from another PC (v3.2.0):** the download database and folder history live in `<downloads>/.tad/` and paths are stored relative to the downloads folder, so you can open the folder from another PC like an Obsidian vault (shared drive or synced folder, any path or drive letter) and its history and library data come with it. `.env`, Telegram sessions, logs and the web password stay per PC. Run the bot on only one PC at a time (one bot token); the web library can run on several.
 - **Requirements:** ffmpeg and ffprobe in PATH or `FFMPEG_PATH` (not bundled). Building from source needs `cd frontend && npm install && npm run build` (Node.js 18+).
 
 ## 📄 License & Disclaimer

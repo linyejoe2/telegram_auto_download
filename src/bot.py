@@ -145,17 +145,16 @@ class TelegramMediaBot:
         self.loop = asyncio.get_event_loop()
 
         # components
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        db_path = os.path.join(base_dir, 'downloads.db')
-        
-        # Get downloads path from environment or use default
+        # Get downloads path from environment or use default; the database and the folder history
+        # live inside it (<downloads>/.tad/, v3.2.0)
         from dotenv import load_dotenv
+        from config.config import get_downloads_dir
         load_dotenv()
-        downloads_path = os.getenv('DOWNLOADS_PATH', os.path.join(base_dir, 'downloads'))
+        downloads_path = get_downloads_dir()
         self.downloads_path = downloads_path
 
         self.monitor = DownloadMonitor(self.loop)
-        self.downloader = MediaDownloader(self.client, max_concurrent_downloads=5, db_path=db_path)
+        self.downloader = MediaDownloader(self.client, max_concurrent_downloads=5)
         self.downloader.set_monitor(self.monitor)
         self.folder_navigator = FolderNavigator(base_path=downloads_path)
 

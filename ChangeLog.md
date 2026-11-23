@@ -1,5 +1,13 @@
 # ChangeLog
 
+## [3.2.0] - 2026-11-23 - Library Data in Downloads Folder
+### Changed
+- The download database now lives at `<DOWNLOADS_PATH>/.tad/downloads.db` (`config.get_database_path()`); the old `<app dir>/downloads.db` is copied there on first start and renamed `downloads.db.migrated`; `DatabaseManager` reopens the database when `DOWNLOADS_PATH` changes
+- `file_path` is stored relative to the downloads folder, so another PC that opens the same folder (different path or drive letter) reuses the history; the SQLite journal is not WAL, so network shares work
+- Folder path history (`🕐` buttons) is saved in `<downloads>/.tad/history.json` instead of memory only; GUI downloads path field uses `get_downloads_dir()` and tells you to restart the bot after saving
+### Fixed
+- The folder picker no longer lists hidden (dot) folders such as `.tad` and the library's `.<file>.shots`
+
 ## [3.1.1] - 2026-11-20 - Library Moved to /library
 ### Changed
 - The web library (frontend, `/library/api`, `/library/media`) now lives under `/library` (`server.PREFIX`, vite `base`, router `basename`); `/` returns an empty page, `/library` redirects to `/library/`; GUI / CLI links point to `/library/`

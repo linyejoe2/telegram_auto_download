@@ -158,6 +158,7 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 downloads.db
+downloads.db.migrated
 
 # Windows Build System
 # ====================

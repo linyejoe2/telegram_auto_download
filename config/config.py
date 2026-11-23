@@ -75,13 +75,41 @@ def get_app_dir():
         # Running in development
         return os.path.dirname(os.path.dirname(__file__))
 
-def get_database_path():
-    """Get the database path that works for both development and packaged app"""
+DATA_DIR_NAME = '.tad'          # library data folder inside DOWNLOADS_PATH (like Obsidian's .obsidian)
+
+
+def get_downloads_dir() -> str:
+    """The current downloads folder (DOWNLOADS_PATH, read live so a reloaded .env takes effect)."""
+    return os.path.abspath(os.getenv('DOWNLOADS_PATH') or os.path.join(get_app_dir(), 'downloads'))
+
+
+def get_data_dir(downloads_dir: str = None) -> str:
+    """Hidden folder inside the downloads folder holding the database and history, so the whole
+    library (media + data) can be opened from any device that mounts the same folder."""
+    path = os.path.join(downloads_dir or get_downloads_dir(), DATA_DIR_NAME)
+    if not os.path.isdir(path):
+        os.makedirs(path, exist_ok=True)
+        if os.name == 'nt':
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetFileAttributesW(path, 0x02)
+            except Exception:
+                pass
+    return path
+
+
+def get_database_path(downloads_dir: str = None):
+    """downloads.db lives in <DOWNLOADS_PATH>/.tad/ (v3.2.0; before that it was next to the app)."""
+    return os.path.join(get_data_dir(downloads_dir), 'downloads.db')
+
+
+def get_legacy_database_path():
+    """Where downloads.db was kept before v3.2.0 (migrated into the downloads folder on first open)."""
     return os.path.join(get_app_dir(), 'downloads.db')
 
-DOWNLOADS_DIR = DOWNLOADS_PATH or os.path.join(get_app_dir(), 'downloads')
+
+DOWNLOADS_DIR = get_downloads_dir()
 LOGS_DIR = os.path.join(get_app_dir(), 'logs')
-DATABASE_PATH = get_database_path()
 
 # Bot Configuration
 MAX_FILE_SIZE_MB = 50  # Telegram bot file upload limit

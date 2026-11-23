@@ -1,13 +1,19 @@
 import sqlite3
 import os
 import logging
+import threading
 from datetime import datetime
 from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
-    """SQLite 單例資料庫管理類"""
+    """SQLite 單例資料庫管理類
+
+    v3.2.0: 資料庫放在 <DOWNLOADS_PATH>/.tad/downloads.db，file_path 存成相對於下載資料夾的路徑，
+    其他裝置掛載同一個下載資料夾（路徑或磁碟代號不同也可以）就能直接沿用下載記錄。
+    DOWNLOADS_PATH 改變時（GUI 重新載入 .env）會自動切換到新資料夾的資料庫。
+    """
 
     _instance = None
     _connection = None
@@ -15,17 +21,108 @@ class DatabaseManager:
     def __new__(cls, db_path: str = None):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            if db_path is None:
-                from config.config import DATABASE_PATH
-                cls._instance.db_path = DATABASE_PATH
-            else:
-                cls._instance.db_path = db_path
-
-            # 建立單一連線
-            cls._instance._connection = sqlite3.connect(cls._instance.db_path, check_same_thread=False)
-            cls._instance._connection.row_factory = sqlite3.Row
-            cls._instance._init_database()
+            cls._instance._lock = threading.RLock()
+            cls._instance._fixed_path = db_path      # 指定路徑時（測試用）不跟著 DOWNLOADS_PATH 切換
+            cls._instance.root = None
+            cls._instance.db_path = None
+        cls._instance._conn()
         return cls._instance
+
+    # ─── connection / location ────────────────────────────────────────────────
+
+    def _conn(self) -> sqlite3.Connection:
+        """目前下載資料夾的連線；DOWNLOADS_PATH 變了就改開新資料夾裡的資料庫"""
+        from config.config import get_downloads_dir
+        root = get_downloads_dir()
+        if self._connection is not None and (self._fixed_path or root == self.root):
+            return self._connection
+        with self._lock:
+            if self._connection is not None and (self._fixed_path or root == self.root):
+                return self._connection
+            self._open(root)
+            return self._connection
+
+    def _open(self, root: str):
+        from config.config import get_database_path
+        os.makedirs(root, exist_ok=True)
+        path = self._fixed_path or get_database_path(root)
+        if not self._fixed_path:
+            self._migrate_legacy(path)
+        # 下載資料夾可能在網路磁碟上：用預設的 rollback journal（WAL 不支援網路檔案系統），並等待其他裝置釋放鎖
+        connection = sqlite3.connect(path, timeout=30, check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        self._connection, self.root, self.db_path = connection, root, path   # 舊連線不關閉，正在用的執行緒還能把查詢做完
+        self._init_database()
+        self._relativize_paths()
+        logger.info(f"使用資料庫: {path}")
+
+    @staticmethod
+    def _migrate_legacy(path: str):
+        """v3.2.0 以前資料庫在程式資料夾；第一次開啟新位置時搬過去（舊檔改名為 .migrated 保留）"""
+        if os.path.exists(path):
+            return
+        from config.config import get_legacy_database_path
+        legacy = get_legacy_database_path()
+        if not os.path.isfile(legacy):
+            return
+        try:
+            source = sqlite3.connect(legacy)
+            target = sqlite3.connect(path)
+            with target:
+                source.backup(target)
+            source.close()
+            target.close()
+            try:
+                os.replace(legacy, legacy + '.migrated')
+            except OSError:
+                pass  # 舊版程式還開著；新位置已經有資料了，留著舊檔即可
+            logger.info(f"已將下載記錄從 {legacy} 搬到 {path}")
+        except Exception as e:
+            logger.error(f"搬移舊資料庫失敗，改用新的空資料庫: {e}")
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _relativize_paths(self):
+        """把下載資料夾內的絕對路徑改成相對路徑（舊記錄、或從別台裝置的舊版程式寫入的記錄）"""
+        try:
+            changed = []
+            for row in self._connection.execute("SELECT id, file_path FROM downloads").fetchall():
+                stored = row["file_path"]
+                if stored and os.path.isabs(stored):
+                    rel = self._to_rel(stored)
+                    if rel != stored:
+                        changed.append((rel, row["id"]))
+            if changed:
+                self._connection.executemany("UPDATE downloads SET file_path = ? WHERE id = ?", changed)
+                self._connection.commit()
+                logger.info(f"已將 {len(changed)} 筆下載記錄的路徑改為相對於下載資料夾")
+        except Exception as e:
+            logger.error(f"轉換下載記錄路徑時出錯: {e}")
+
+    def _to_rel(self, path: str) -> str:
+        """存進資料庫的路徑：下載資料夾內用 / 分隔的相對路徑，資料夾外保留絕對路徑"""
+        if not path:
+            return path
+        try:
+            rel = os.path.relpath(os.path.abspath(path), self.root)
+        except ValueError:          # 不同磁碟
+            return path
+        if rel == '..' or rel.startswith('..' + os.sep) or os.path.isabs(rel):
+            return path
+        return rel.replace(os.sep, '/')
+
+    def _to_abs(self, stored: str) -> str:
+        if not stored or os.path.isabs(stored):
+            return stored
+        return os.path.join(self.root, *stored.split('/'))
+
+    def _row(self, row) -> dict:
+        record = dict(row)
+        record["file_path"] = self._to_abs(record.get("file_path"))
+        return record
 
     def _init_database(self):
         """初始化資料庫"""
@@ -64,7 +161,7 @@ class DatabaseManager:
     def is_file_downloaded(self, file_unique_id: str) -> bool:
         """檢查文件是否已經下載過"""
         try:
-            cursor = self._connection.execute(
+            cursor = self._conn().execute(
                 "SELECT 1 FROM downloads WHERE file_unique_id = ? LIMIT 1",
                 (file_unique_id,)
             )
@@ -76,7 +173,7 @@ class DatabaseManager:
     def find_download(self, file_path: str) -> Optional[dict]:
         """找出磁碟上某個檔案的下載記錄：先比對路徑，檔案被搬移過則改比對 檔名 + 大小"""
         try:
-            rows = [dict(r) for r in self._connection.execute(
+            rows = [self._row(r) for r in self._conn().execute(
                 "SELECT * FROM downloads WHERE file_name = ?", (os.path.basename(file_path),)
             ).fetchall()]
             if not rows:
@@ -97,7 +194,7 @@ class DatabaseManager:
         """檢查某個網址（YouTube / X 等）是否已下載過；忽略查詢參數"""
         base = url.split('?')[0]
         try:
-            cursor = self._connection.execute(
+            cursor = self._conn().execute(
                 "SELECT 1 FROM downloads WHERE file_id = ? OR file_id LIKE ? LIMIT 1",
                 (base, base + '?%')
             )
@@ -109,12 +206,12 @@ class DatabaseManager:
     def get_downloaded_file_info(self, file_unique_id: str) -> Optional[dict]:
         """獲取已下載文件的詳細信息"""
         try:
-            cursor = self._connection.execute(
+            cursor = self._conn().execute(
                 "SELECT * FROM downloads WHERE file_unique_id = ? LIMIT 1",
                 (file_unique_id,)
             )
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return self._row(row) if row else None
         except Exception as e:
             logger.error(f"獲取文件信息時出錯: {e}")
             return None
@@ -125,16 +222,17 @@ class DatabaseManager:
                        file_type: str = None, mime_type: str = None,
                        message_date: datetime = None) -> bool:
         try:
-            self._connection.execute("""
-                INSERT OR REPLACE INTO downloads 
-                (file_unique_id, file_id, message_id, chat_id, file_name, 
-                 original_file_name, file_path, file_size, file_type, 
+            connection = self._conn()
+            connection.execute("""
+                INSERT OR REPLACE INTO downloads
+                (file_unique_id, file_id, message_id, chat_id, file_name,
+                 original_file_name, file_path, file_size, file_type,
                  mime_type, message_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (file_unique_id, file_id, message_id, chat_id, file_name,
-                  original_file_name, file_path, file_size, file_type,
+                  original_file_name, self._to_rel(file_path), file_size, file_type,
                   mime_type, message_date))
-            self._connection.commit()
+            connection.commit()
             logger.debug(f"記錄文件下載: {file_name}")
             return True
         except Exception as e:
@@ -144,8 +242,8 @@ class DatabaseManager:
     def get_download_statistics(self) -> dict:
         """獲取下載統計信息"""
         try:
-            cursor = self._connection.execute("""
-                SELECT 
+            cursor = self._conn().execute("""
+                SELECT
                     COUNT(*) as total_files,
                     SUM(file_size) as total_size,
                     COUNT(DISTINCT chat_id) as unique_chats,
@@ -182,19 +280,19 @@ class DatabaseManager:
     def cleanup_missing_files(self) -> Tuple[int, int]:
         """清理資料庫中指向不存在文件的記錄"""
         try:
-            cursor = self._connection.execute("SELECT id, file_path FROM downloads")
-            records = cursor.fetchall()
+            connection = self._conn()
+            records = connection.execute("SELECT id, file_path FROM downloads").fetchall()
 
             missing_count = 0
             total_count = len(records)
 
             for record in records:
-                if not os.path.exists(record["file_path"]):
-                    self._connection.execute("DELETE FROM downloads WHERE id = ?", (record["id"],))
+                if not os.path.exists(self._to_abs(record["file_path"])):
+                    connection.execute("DELETE FROM downloads WHERE id = ?", (record["id"],))
                     missing_count += 1
                     logger.debug(f"刪除不存在文件的記錄: {record['file_path']}")
 
-            self._connection.commit()
+            connection.commit()
             logger.info(f"清理完成: 刪除了 {missing_count} 個不存在文件的記錄")
             return missing_count, total_count
         except Exception as e:
@@ -204,12 +302,12 @@ class DatabaseManager:
     def get_recent_downloads(self, limit: int = 10) -> List[dict]:
         """獲取最近下載的文件列表"""
         try:
-            cursor = self._connection.execute("""
-                SELECT * FROM downloads 
-                ORDER BY download_date DESC 
+            cursor = self._conn().execute("""
+                SELECT * FROM downloads
+                ORDER BY download_date DESC
                 LIMIT ?
             """, (limit,))
-            return [dict(row) for row in cursor.fetchall()]
+            return [self._row(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"獲取最近下載列表時出錯: {e}")
             return []

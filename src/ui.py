@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.1.1"
+        self.version = "v3.2.0"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -567,7 +567,7 @@ class TelegramBotGUI:
 
     def load_current_settings(self):
         """Load current settings from .env file"""
-        self.downloads_path_var.set(os.getenv('DOWNLOADS_PATH', os.path.join(os.path.dirname(__file__), 'downloads')))
+        self.downloads_path_var.set(bot_config.get_downloads_dir())
         self.api_id_var.set(os.getenv('API_ID', ''))
         self.api_hash_var.set(os.getenv('API_HASH', ''))
         self.phone_var.set(os.getenv('PHONE_NUMBER', ''))
@@ -636,7 +636,12 @@ class TelegramBotGUI:
             env_file = '.env'
             set_key(env_file, 'DOWNLOADS_PATH', downloads_path)
             
-            messagebox.showinfo("Success", "Downloads path saved successfully!")
+            messagebox.showinfo(
+                "Success",
+                "Downloads path saved successfully!\n\n"
+                "The download history and folder history are kept inside this folder (hidden .tad folder), "
+                "so another PC that opens the same folder sees the same library.\n"
+                "Restart the bot to switch to it.")
             logging.info(f"Downloads path updated to: {downloads_path}")
             
         except Exception as e:

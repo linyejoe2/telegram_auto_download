@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v3.1.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v3.2.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -69,10 +69,10 @@ setup_build_env.bat
 - **src/bot.py**: Main bot logic and message handling (`TelegramMediaBot` class)
 - **src/downloader.py**: Media download operations with concurrent processing (`MediaDownloader` class)
 - **src/monitor.py**: Real-time monitoring and progress tracking (`DownloadMonitor` class)
-- **src/database.py**: SQLite database management for download history and metadata
+- **src/database.py**: SQLite database management for download history and metadata; lives at `<DOWNLOADS_PATH>/.tad/downloads.db`, reopens when `DOWNLOADS_PATH` changes, migrates the legacy `<app dir>/downloads.db`, stores `file_path` relative to the downloads folder (v3.2.0)
 - **src/folder_navigator.py**: Interactive folder navigation and path management system
 - **src/file_viewer.py**: Chat file viewer (`FileViewer`, `build_preview`, `source_link`, plus `list_videos`, `build_batch_preview`, `build_frame_preview`, `PreviewBatch` for folder video previews, v2.7.1) for `/files` (v2.7.0)
-- **config/config.py**: Configuration management using environment variables from `.env` file (`get_web_settings()` for the web library, v3.0.0)
+- **config/config.py**: Configuration management using environment variables from `.env` file (`get_web_settings()` for the web library, v3.0.0; v3.2.0: `DATA_DIR_NAME = '.tad'`, `get_downloads_dir()`, `get_data_dir()`, `get_database_path()`, `get_legacy_database_path()`, `DATABASE_PATH` removed)
 
 ### Web Library Components (v3.0.0)
 - **library/**: aiohttp backend of the web video library: `media.py` (ffprobe/ffmpeg, sidecar metadata), `store.py` (`Library`), `auth.py` (password/session), `server.py` (`LibraryServer`)
@@ -171,7 +171,8 @@ Inline keyboard folder navigation and path management (v2.1.0):
 - `navigate_up(user_id)`: Goes up one directory level
 - `navigate_to_history(user_id, history_index)`: Jumps to a previously confirmed path
 - `create_folder_and_navigate(user_id, folder_name)`: Creates folder from user text input and navigates into it
-- `confirm_selection(user_id)`: Confirms path, updates history (max 5 entries, most recent first)
+- `confirm_selection(user_id)`: Confirms path, updates history (max 5 entries, most recent first); history is saved to `<downloads>/.tad/history.json` (`_load_history`/`_save_history`, atomic write, v3.2.0)
+- `_generate_folder_ui`: skips dot entries, so `.tad` and the library's `.<file>.shots` are not listed (v3.2.0)
 - `get_selected_path()`: Returns absolute path of current selection
 - `is_awaiting_folder_selection()` / `is_awaiting_folder_name()`: State guards for message routing
 - `clear_user_state()`: Resets navigation state while preserving path history
@@ -221,6 +222,7 @@ The bot requires these environment variables in `.env`:
 - `PHONE_NUMBER`: Phone number for Telegram client authentication
 - `BOT_TOKEN`: Bot token from @BotFather
 - `STARTUP_SCAN_COUNT` (optional, v2.6.1): number of latest messages sent to the bot that are scanned at startup (default 30, 0 = off); read via `config.get_startup_scan_count()`, editable in GUI Configuration tab; `DatabaseManager.is_url_downloaded()` checks links ignoring query params
+- `DOWNLOADS_PATH` (optional, v3.2.0): downloads folder, read live via `config.get_downloads_dir()` (default `<app dir>/downloads`); data folder `<downloads>/.tad/` (hidden on Windows) holds `downloads.db` and `history.json`, so the folder can be opened from another PC (paths relative, sqlite default journal, no WAL). Per device: `.env`, Telethon sessions, logs; run the bot on one PC at a time, the web library may run on several
 - Database (v2.7.0): `DatabaseManager.find_download(file_path)` returns the download record of a file on disk (path match, fallback file name + size so moved files are found); used by the file viewer for source links
 - Security (v2.7.0): the `/files` viewer is owner-only (`TelegramMediaBot.owner_id` = Telethon session account) and confined to the downloads folder
 - Web library (v3.0.0, all optional, read via `config.get_web_settings()`): `WEB_ENABLED` (1 = start with the bot, default 0), `WEB_PORT` (default 8765), `WEB_HOST` (`0.0.0.0` any location / `127.0.0.1` this PC only), `WEB_PASSWORD_HASH` (PBKDF2, set from the GUI Web Library tab, never plain text), `WEB_SECRET` (cookie signing key), `SIMILARITY_THRESHOLD` (percent, default 70, GUI "Same-video similarity", v3.1.0); needs ffmpeg/ffprobe in PATH or `FFMPEG_PATH`, `aiohttp`, and a built `library/static` (Node.js 18+)
@@ -273,9 +275,9 @@ telegram_auto_download/
 ├── create_version_info.py      # Version info generator (v1.0.0)
 ├── create_icon.py              # Application icon generator (v1.0.0)
 ├── ChangeLog.md                # Version history and release notes
-├── downloads/                  # User-organized backup directory with folder structure
+├── downloads/                  # User-organized backup directory with folder structure (DOWNLOADS_PATH)
+│   └── .tad/                   # Data folder (v3.2.0): downloads.db (download history), history.json (folder path history)
 ├── logs/                       # Log files directory (auto-created)
-├── downloads.db                # SQLite database for download history
 └── bot_session.session         # Telethon session file (auto-generated)
 ```
 

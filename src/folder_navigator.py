@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 logger = logging.getLogger(__name__)
 
 MAX_PATH_HISTORY = 5
+HISTORY_FILE = 'history.json'
 FOLDERS_PER_ROW = 2
 
 
@@ -44,11 +46,44 @@ class FolderNavigator:
         self.user_states: Dict[int, NavigationState] = {}
         os.makedirs(self.base_path, exist_ok=True)
 
+    # ─── path history (kept in <downloads>/.tad/history.json, v3.2.0) ───────
+
+    def _history_file(self) -> str:
+        from config.config import get_data_dir
+        return os.path.join(get_data_dir(self.base_path), HISTORY_FILE)
+
+    def _read_history_file(self) -> dict:
+        try:
+            with open(self._history_file(), encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            logger.warning(f"讀取路徑歷史失敗: {e}")
+            return {}
+
+    def _load_history(self, user_id: int) -> List[str]:
+        paths = self._read_history_file().get('folder_history', {}).get(str(user_id), [])
+        return [p for p in paths if isinstance(p, str)][:MAX_PATH_HISTORY]
+
+    def _save_history(self, user_id: int, history: List[str]):
+        try:
+            data = self._read_history_file()        # re-read: another device may have written meanwhile
+            data.setdefault('folder_history', {})[str(user_id)] = history
+            path = self._history_file()
+            tmp = f"{path}.{os.getpid()}.tmp"
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except Exception as e:
+            logger.warning(f"儲存路徑歷史失敗: {e}")
+
     # ─── state helpers ───────────────────────────────────────────────────────
 
     def get_user_state(self, user_id: int) -> NavigationState:
         if user_id not in self.user_states:
-            self.user_states[user_id] = NavigationState(user_id=user_id)
+            self.user_states[user_id] = NavigationState(user_id=user_id, path_history=self._load_history(user_id))
         return self.user_states[user_id]
 
     def is_awaiting_folder_selection(self, user_id: int) -> bool:
@@ -160,6 +195,7 @@ class FolderNavigator:
             state.path_history.remove(rel)
         state.path_history.insert(0, rel)
         state.path_history = state.path_history[:MAX_PATH_HISTORY]
+        self._save_history(user_id, state.path_history)
 
         state.awaiting_folder_selection = False
         logger.info(f"用戶 {user_id} 確認存放位置: {display_path}")
@@ -177,6 +213,8 @@ class FolderNavigator:
         try:
             if os.path.exists(current_full):
                 for item in os.listdir(current_full):
+                    if item.startswith('.'):    # .tad data folder, library sidecars (.<file>.shots), etc.
+                        continue
                     item_path = os.path.join(current_full, item)
                     if os.path.isdir(item_path):
                         folders.append(item)
