@@ -1,6 +1,6 @@
-# Telegram Auto Download Bot v3.2.0
+# Telegram Auto Download Bot v3.3.1
 
-A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, database tracking, and real-time progress.
+A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, download-record tracking, and real-time progress.
 
 ---
 
@@ -15,8 +15,8 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 - **📁 Folder Navigation**  
   Interactive inline keyboard buttons to browse and choose download location, with previous-path quick-select.
 
-- **🗃️ SQLite Database**  
-  Tracks download history and prevents duplicates. Stored inside the downloads folder (`<DOWNLOADS_PATH>/.tad/downloads.db`, v3.2.0), so history and library data travel with the folder.
+- **🗃️ Download Records**  
+  Tracks download history and prevents duplicates. Each file's record is kept beside it in a hidden `.<file>.meta.json` and deleted downloads in `<DOWNLOADS_PATH>/.tad/deleted.json` (v3.3.0, no database), so history and library data travel with the folder.
 
 - **⚡ High Performance**  
   Concurrent downloads (up to 5), real-time metrics, and progress display.
@@ -37,7 +37,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
   Send `/files` to browse folders, preview folder videos, check the source link of, and delete downloaded files right from Telegram (owner only).
 
 - **🎬 Web Video Library (v3.0.0)**  
-  Watch and manage downloaded videos in a browser: screenshots, search, tags, live transcoding, password protected.
+  Watch and manage downloaded videos and photos in a browser: screenshots, search, tags, live transcoding, download history, password protected.
 
 ---
 
@@ -45,7 +45,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.2.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.3.1.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -65,7 +65,7 @@ API_ID=your_api_id
 API_HASH=your_api_hash
 PHONE_NUMBER=+1234567890
 BOT_TOKEN=your_bot_token
-DOWNLOADS_PATH=downloads # optional: downloads folder (default <app dir>/downloads); the database is kept in <DOWNLOADS_PATH>/.tad/ (v3.2.0)
+DOWNLOADS_PATH=downloads # optional: downloads folder (default <app dir>/downloads); download records are kept beside each file and in <DOWNLOADS_PATH>/.tad/ (v3.3.0)
 STARTUP_SCAN_COUNT=30   # optional: messages checked at startup (0 = off)
 WEB_ENABLED=1           # optional: start the web video library with the bot (v3.0.0)
 SIMILARITY_THRESHOLD=70 # optional: % similarity at which same-length videos are grouped as versions (v3.1.0)
@@ -144,7 +144,7 @@ Send any supported video URL directly to the bot (no forwarding needed):
 | X / Twitter | `https://x.com/i/status/...` · `https://twitter.com/.../status/...` |
 | Pornhub | `https://www.pornhub.com/view_video.php?viewkey=...` · `interstitial?viewkey=...` |
 
-The bot fetches metadata (title, duration, size), then shows the folder selection keyboard. After confirming, it downloads the video, computes a perceptual hash for duplicate detection, and records it in the database.
+The bot fetches metadata (title, duration, size), then shows the folder selection keyboard. After confirming, it downloads the video, computes a perceptual hash for duplicate detection, and records it.
 
 > **Note:** X and Pornhub downloads use Firefox browser cookies for authentication. Make sure you are logged in to those sites in Firefox on the same machine.
 
@@ -172,7 +172,7 @@ Send a Telegram message link (`https://t.me/<channel>/<id>` or `https://t.me/c/<
 
 The bot accepts forwarded posts, albums, X/YouTube links and X account links even while a download is running. Items wait in a serial queue (shown with their queue position); each gets its own folder selector, which appears only after the previous download finishes. Tap `❌ 取消` on a selector (or the X-account mode buttons) to skip an item; an unanswered selector times out after 30 minutes. The queue is kept in memory and is dropped when the bot stops.
 
-On startup the bot checks the last `STARTUP_SCAN_COUNT` messages you sent it (default 30, `0` = off; also set in GUI Configuration > Bot Configuration > "Startup scan (messages)") against the download database and queues every forwarded channel post/album or X/YouTube link not yet downloaded, one item each. X account links are not scanned; forwards from supergroups/anonymous admins are skipped. Send `/rescan` (owner only, optional message count, e.g. `/rescan 50`) to run the same scan again at any time; items already in the queue are not added twice.
+On startup the bot checks the last `STARTUP_SCAN_COUNT` messages you sent it (default 30, `0` = off; also set in GUI Configuration > Bot Configuration > "Startup scan (messages)") against the download records and queues every forwarded channel post/album or X/YouTube link not yet downloaded, one item each. X account links are not scanned; forwards from supergroups/anonymous admins are skipped. Send `/rescan` (owner only, optional message count, e.g. `/rescan 50`) to run the same scan again at any time; items already in the queue are not added twice.
 
 ## 📂 File Viewer
 
@@ -199,7 +199,10 @@ A browser app (v3.0.0) for watching and managing the videos in your downloads fo
 - **Video page:** cover with play button and a 3x3 screenshot grid (click a screenshot to play from there); edit 標題 / 主演 (multi-select tags) / 系列 / 來源 (auto-filled from the download record); Video Info (size, bit rate, bit depth, codec, fps, audio, duration, playback mode, location); download the original, regenerate screenshots, delete (with confirmation).
 - **Playback:** the original file is played when the browser supports it; otherwise (or if it fails) the server transcodes live with ffmpeg to H.264/AAC with seek, ±10s, volume, 480/720/1080p, fullscreen and keys Space / ←/→ / F. Safari/iOS cannot play the live transcode.
 - **Where data is stored:** next to each video as hidden files `.<file>.meta.json` (title, actors, series, source, cached info) and `.<file>.shots/01.jpg-09.jpg`; the chat `/files` viewer skips them. Deleting from the web also removes the video, these files and the hidden `.720p_h265` copy. The downloads folder is rescanned every 5 minutes.
-- **Open from another PC (v3.2.0):** the download database and folder history live in `<downloads>/.tad/` and paths are stored relative to the downloads folder, so you can open the folder from another PC like an Obsidian vault (shared drive or synced folder, any path or drive letter) and its history and library data come with it. `.env`, Telegram sessions, logs and the web password stay per PC. Run the bot on only one PC at a time (one bot token); the web library can run on several.
+- **Photos (v3.3.0):** the library also lists photos (.jpg .jpeg .png .gif .webp .bmp) with a thumbnail and Photo Info (size, format, bit depth, location); the 影片 / 圖片 / 全部 toggle on the filter row picks what is shown (remembered per browser, `?kind=` in the URL). The photo page has a large image, ‹ › (or ←/→) to the neighbors in the same folder, regenerate thumbnail, and delete, which continues with the next photo. Photos are not grouped as versions.
+- **Download history (v3.3.0):** the 📜 下載紀錄 button opens a page listing every download, existing and deleted, with search and status / type filters. Deleting a file keeps its record (and 標題 / 主演 / 系列 / 來源), so the startup scan and `/rescan` do not offer it again; a deleted row has ⬇ 重新下載, which queues it into its original folder. Re-download needs the bot running on that PC.
+- **Re-download broken files (v3.3.1):** a video or photo that is incomplete or damaged shows a red box on its page with how its source will be found (its own record, a deleted record with the same file name, or the Telegram message id in the file name) and a ⬇ 重新下載 button; the broken copy is replaced once the source is found. Needs the bot running on that PC.
+- **Open from another PC (v3.2.0):** the download records (stored beside each file, with deleted ones and folder history in `<downloads>/.tad/`, v3.3.0; an old `downloads.db` is imported once and renamed `downloads.db.migrated`) and paths relative to the downloads folder let you open the folder from another PC like an Obsidian vault (shared drive or synced folder, any path or drive letter) and its history and library data come with it. `.env`, Telegram sessions, logs and the web password stay per PC. Run the bot on only one PC at a time (one bot token); the web library can run on several.
 - **Requirements:** ffmpeg and ffprobe in PATH or `FFMPEG_PATH` (not bundled). Building from source needs `cd frontend && npm install && npm run build` (Node.js 18+).
 
 ## 📄 License & Disclaimer

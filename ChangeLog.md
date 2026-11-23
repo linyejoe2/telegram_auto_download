@@ -1,5 +1,20 @@
 # ChangeLog
 
+## [3.3.1] - 2026-11-23 - Re-download Broken Files
+### Added
+- Item page of a broken video / photo (e.g. 檔案不完整或已損毀) shows how its source will be found and a ⬇ 重新下載 button (`POST /library/api/videos/{id}/redownload`, `src/records.py` `plan_redownload()`: own record, a deleted record with the same file name, or the Telegram message id parsed from the file name searched in the channels of recorded files)
+### Changed
+- Re-download keeps the broken file until the source is found (Telegram) or removes it first (YouTube / X / Pornhub); `MediaDownloader.file_name_for()` split out of `download_media_from_message()`
+
+## [3.3.0] - 2026-11-23 - Records Beside Files, Photos & Download History
+### Added
+- Web library shows photos too (`library/media.py` `process_image()`, `store.py` entry `kind`): thumbnail and image info, 影片 / 圖片 / 全部 toggle (`?kind=`), photo page with ‹ › / ←/→ to neighbors
+- 下載紀錄 page (`/history`, `GET /api/history`): search and filter downloaded and deleted items; `POST /api/history/redownload` queues a deleted item again into its original folder (the bot must be running on that PC; `bot.py` `request_redownload_threadsafe`)
+### Changed
+- The SQLite database is gone: `src/records.py` `DownloadRecords` replaces `src/database.py`; each file's record is the `download` key of its hidden `.<file>.meta.json`, deleted downloads move to `<downloads>/.tad/deleted.json` (still counted as downloaded, so scans do not re-offer them); `downloads.db` (v3.2.0 or legacy) is imported once and renamed `downloads.db.migrated`
+### Fixed
+- Re-downloading a deleted YouTube / X / Pornhub video is no longer dropped as a duplicate
+
 ## [3.2.0] - 2026-11-23 - Library Data in Downloads Folder
 ### Changed
 - The download database now lives at `<DOWNLOADS_PATH>/.tad/downloads.db` (`config.get_database_path()`); the old `<app dir>/downloads.db` is copied there on first start and renamed `downloads.db.migrated`; `DatabaseManager` reopens the database when `DOWNLOADS_PATH` changes

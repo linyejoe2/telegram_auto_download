@@ -18,7 +18,7 @@ from telegram.ext import Application, MessageHandler, CallbackQueryHandler, Comm
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader
 from .folder_navigator import FolderNavigator
-from .database import DatabaseManager
+from .records import DownloadRecords
 from .file_viewer import FileViewer, build_preview, build_batch_preview, build_frame_preview, probe_video, fmt_size
 from .video_loader import (find_ffmpeg, needs_compression, existing_compressed, compress_video,
                            MAX_UPLOAD_BYTES, TARGET_HEIGHT, TARGET_BITRATE_KBPS)
@@ -1025,9 +1025,9 @@ class TelegramMediaBot:
 
     # ---------------------- startup scan ----------------------
     def _is_media_downloaded(self, message) -> bool:
-        """True if recorded in the DB, or if it has no downloadable photo/document at all."""
+        """True if downloaded before (even if deleted since), or if it has no downloadable photo/document."""
         unique_id = self.downloader._get_file_unique_id(message)
-        return unique_id is None or DatabaseManager().is_file_downloaded(str(unique_id))
+        return unique_id is None or DownloadRecords().is_file_downloaded(str(unique_id))
 
     async def _find_undownloaded(self, sent_messages):
         """Check the user's own messages to the bot, oldest first.
@@ -1038,7 +1038,7 @@ class TelegramMediaBot:
         from telethon import utils
         from telethon.tl.types import PeerChannel
 
-        db = DatabaseManager()
+        db = DownloadRecords()
         units, claimed, seen_urls, seen_groups = [], set(), set(), set()
 
         for m in sent_messages:
@@ -1176,6 +1176,105 @@ class TelegramMediaBot:
         """Send `text` to the owner from another thread (e.g. the web library's similar-video notice)."""
         if self.owner_id and loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(self.app.bot.send_message(chat_id=self.owner_id, text=text), loop)
+
+    # ---------------------- download again (web library 下載紀錄) ----------------------
+    def request_redownload_threadsafe(self, loop, record: dict, replace: str = None):
+        """Called from the web library's thread: queue downloading a file again — a deleted one
+        (下載紀錄), or a broken one still on disk (`replace`: removed once the source is reachable).
+        Returns an error text, or None when it was queued (progress is shown in the owner's chat)."""
+        if not (self.owner_id and loop and loop.is_running()):
+            return '機器人尚未啟動完成，請稍後再試'
+        uid, file_id = str(record.get('file_unique_id') or ''), str(record.get('file_id') or '')
+        is_url = file_id.lower().startswith(('http://', 'https://'))
+        has_chat = record.get('chat_id') or record.get('candidate_chats')
+        if not uid.startswith('xprofile_') and not is_url and not (has_chat and record.get('message_id')):
+            return '這筆紀錄沒有來源頻道 / 訊息資訊，無法重新下載'
+        if is_url and not uid.startswith('xprofile_') and url_parser.detect_type(file_id) not in ('youtube', 'x', 'pornhub'):
+            return '不支援重新下載這種連結'
+        asyncio.run_coroutine_threadsafe(self._submit_redownload(record, replace), loop)
+        return None
+
+    async def _submit_redownload(self, record: dict, replace: str = None):
+        name = record.get('file_name') or record.get('file_unique_id')
+        what = '損毀的檔案' if replace else '網頁下載紀錄'
+        try:
+            status = await self.app.bot.send_message(chat_id=self.owner_id, text=f"🔁 {what}：重新下載「{name}」")
+        except Exception as e:
+            logger.error(f"重新下載：無法傳送訊息: {e}")
+            return
+        await self.submit_flow(self.owner_id, f"🔁 重新下載「{name}」", status,
+                               partial(self._redownload_now, record, status, replace))
+
+    @staticmethod
+    def _discard_broken(path: str):
+        """Remove a broken file before its replacement is downloaded; its record goes to deleted.json
+        (with title / actors / series, restored when the new file is recorded)."""
+        if not path or not os.path.exists(path):
+            return
+        DownloadRecords().forget_file(path)
+        os.remove(path)
+        logger.info(f"重新下載：已移除損毀的檔案 {path}")
+
+    async def _find_source_message(self, record: dict, status):
+        """The Telegram message to download: the recorded one, or (no record) the message with the id
+        from the file name in one of the candidate channels whose media would be saved under that name."""
+        mid, name = int(record['message_id']), record.get('file_name') or ''
+        if record.get('chat_id'):
+            chats, check_name = [int(record['chat_id'])], False
+        else:
+            chats, check_name = record.get('candidate_chats') or [], True
+            await self._safe_edit(status, f"🔍 沒有下載紀錄，正在 {len(chats)} 個頻道中尋找訊息 {mid}：{name}")
+        for chat in chats:
+            try:
+                entity = await self.client.get_entity(PeerChannel(int(chat)))
+                message = await self.client.get_messages(entity, ids=mid)
+            except Exception as e:
+                logger.debug(f"重新下載：頻道 {chat} 讀取訊息 {mid} 失敗: {e}")
+                continue
+            if not message or not getattr(message, 'media', None):
+                continue
+            named = self.downloader.file_name_for(message)
+            if not check_name or (named and named[0] == name):
+                return message
+        return None
+
+    async def _redownload_now(self, record: dict, status, replace: str = None):
+        """Runs as a queue item (after earlier downloads finish) into the file's folder."""
+        folder = os.path.dirname(record.get('file_path') or '') or self.downloads_path
+        name = record.get('file_name') or ''
+        uid, file_id = str(record.get('file_unique_id') or ''), str(record.get('file_id') or '')
+        try:
+            os.makedirs(folder, exist_ok=True)
+            if uid.startswith('xprofile_'):              # one photo / video of an X account download
+                from web.x_profile_downloader import _fetch
+                path = os.path.join(folder, name)
+                await self._safe_edit(status, f"⬇️ 重新下載中：{name}")
+                # _fetch writes <path>.part and then replaces the file (a broken one of the same name too)
+                await asyncio.get_running_loop().run_in_executor(None, _fetch, file_id, path)
+                if replace and os.path.normcase(replace) != os.path.normcase(path):
+                    self._discard_broken(replace)
+                DownloadRecords().record_download(
+                    file_unique_id=uid, file_id=file_id, message_id=record.get('message_id') or 0, chat_id=0,
+                    file_name=name, file_path=path, original_file_name=name, file_size=os.path.getsize(path),
+                    file_type=record.get('file_type'), mime_type=record.get('mime_type'))
+                await self._safe_edit(status, f"✅ 已重新下載：{name}\n📁 {folder}")
+            elif file_id.lower().startswith(('http://', 'https://')):
+                # the broken copy would count as "already downloaded" (same fingerprint): remove it first;
+                # its record stays in 下載紀錄, so a failed attempt can be retried from there
+                self._discard_broken(replace)
+                await url_parser.download_confirmed(self.owner_id, file_id, url_parser.detect_type(file_id), status,
+                                                    self.folder_navigator, selected_path=folder)
+            else:
+                original = await self._find_source_message(record, status)
+                if not original:
+                    await self._safe_edit(status, f"❌ 找不到原訊息（可能已被刪除、帳號已不在該頻道，或不是從這些頻道下載的）：{name}"
+                                                  + ("\n損毀的檔案仍保留著；可以把原訊息重新轉傳給 Bot" if replace else ""))
+                    return
+                self._discard_broken(replace)            # only now that the source is known to be reachable
+                await self._start_download_with_selected_folder(folder, status, [original])
+        except Exception as e:
+            logger.error(f"重新下載失敗 {name}: {e}")
+            await self._safe_edit(status, f"❌ 重新下載失敗：{e}")
 
     def get_download_statistics(self):
         return self.downloader.get_download_statistics()

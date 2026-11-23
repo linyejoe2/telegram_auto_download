@@ -1,9 +1,10 @@
 """
-library/store.py — The video index behind the web library.
+library/store.py — The media index behind the web library.
 
-Scans the downloads folder for videos, loads each one's sidecar metadata, and fills in missing
-video info / screenshots in background threads. A video's id is its path relative to the downloads
-folder, base64url-encoded, so links survive restarts; every id is checked to stay inside the folder.
+Scans the downloads folder for videos and photos (v3.3.0), loads each one's sidecar metadata, and fills
+in missing info / screenshots (photos: one thumbnail) in background threads. An item's id is its path
+relative to the downloads folder, base64url-encoded, so links survive restarts; every id is checked to
+stay inside the folder. Deleting / moving a file keeps the bot's download records (src/records.py) current.
 """
 
 import base64
@@ -43,6 +44,18 @@ def check_name(name: str) -> str:
     return name
 
 
+def _records():
+    from src.records import DownloadRecords
+    return DownloadRecords()
+
+
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
 def _sidecars(video: str) -> list:
     """Hidden files that belong to a video and move / rename with it."""
     paths = [media.meta_path(video), media.shots_dir(video)]
@@ -68,7 +81,7 @@ def decode_id(vid: str) -> Optional[str]:
 class Library:
     def __init__(self, base_path: Callable[[], str]):
         self._base_path = base_path
-        self.entries: Dict[str, dict] = {}      # id -> {'path', 'rel', 'meta', 'error'}
+        self.entries: Dict[str, dict] = {}      # id -> {'path', 'rel', 'kind', 'meta', 'meta_mtime', 'error'}
         self._lock = threading.RLock()
         self._pool = ThreadPoolExecutor(max_workers=BACKGROUND_WORKERS, thread_name_prefix='library')
         self._pending = set()                    # ids with a background job queued / running
@@ -86,7 +99,7 @@ class Library:
         return os.path.realpath(self._base_path())
 
     def resolve(self, vid: str) -> Optional[str]:
-        """Absolute path of a video id, or None if it isn't a video inside the downloads folder."""
+        """Absolute path of an item id, or None if it isn't a video / photo inside the downloads folder."""
         rel = decode_id(vid)
         if not rel or os.path.isabs(rel) or '\0' in rel:
             return None
@@ -96,20 +109,20 @@ class Library:
             inside = os.path.normcase(os.path.commonpath([base, target])) == os.path.normcase(base)
         except ValueError:
             return None
-        if not inside or not os.path.isfile(target) or not media.is_video(os.path.basename(target)):
+        if not inside or not os.path.isfile(target) or not media.is_media(os.path.basename(target)):
             return None
         return target
 
     # ── scanning ──
 
     def scan(self) -> int:
-        """Rebuild the index from disk; queue info / screenshot jobs for videos that need them."""
+        """Rebuild the index from disk; queue info / screenshot jobs for items that need them."""
         base = self.base()
         found = {}
         for root, dirs, files in os.walk(base):
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             for name in files:
-                if media.is_video(name):
+                if media.is_media(name):
                     path = os.path.join(root, name)
                     rel = os.path.relpath(path, base).replace(os.sep, '/')
                     found[encode_id(rel)] = (path, rel)
@@ -120,7 +133,11 @@ class Library:
                     del self.entries[vid]
             for vid, (path, rel) in found.items():
                 if vid not in self.entries:
-                    self.entries[vid] = {'path': path, 'rel': rel, 'meta': media.load_meta(path), 'error': None}
+                    self.entries[vid] = {'path': path, 'rel': rel, 'kind': media.kind_of(path),
+                                         'meta': media.load_meta(path), 'meta_mtime': _mtime(media.meta_path(path)),
+                                         'error': None}
+                elif vid not in self._pending:
+                    self._sync_meta(self.entries[vid])
             self.last_scan = time.time()
             todo = [vid for vid, e in self.entries.items() if self._needs_refresh(e)]
             fresh = [vid for vid in todo if self._still_changing(self.entries[vid]['path'])]
@@ -128,9 +145,23 @@ class Library:
             self.deferred = len(fresh)
         for vid in todo:
             self.queue_refresh(vid)
-        logger.info(f"影片庫掃描完成：{len(found)} 部影片，{len(todo)} 部需要產生資訊/截圖"
+        photos = sum(1 for e in self.entries.values() if e['kind'] == 'photo')
+        logger.info(f"影片庫掃描完成：{len(found) - photos} 部影片、{photos} 張照片，{len(todo)} 個需要產生資訊/截圖"
                     + (f"，{self.deferred} 部仍在寫入中，稍後再處理" if self.deferred else ""))
         return len(found)
+
+    @staticmethod
+    def _sync_meta(entry: dict):
+        """Reload the sidecar if something else changed it (the bot's download record, another PC)."""
+        mtime = _mtime(media.meta_path(entry['path']))
+        if mtime != entry.get('meta_mtime'):
+            entry['meta'] = media.load_meta(entry['path'])
+            entry['meta_mtime'] = mtime
+
+    @staticmethod
+    def _save(entry: dict):
+        media.save_meta(entry['path'], entry['meta'])
+        entry['meta_mtime'] = _mtime(media.meta_path(entry['path']))
 
     @staticmethod
     def _still_changing(path: str) -> bool:
@@ -164,29 +195,34 @@ class Library:
                 entry = self.entries.get(vid)
                 if not entry:
                     return
-                path, meta = entry['path'], dict(entry['meta'])
+                path, meta, kind = entry['path'], dict(entry['meta']), entry['kind']
             mtime = os.path.getmtime(path)
             info, shots = meta.get('info'), meta.get('shots')
-            if not info or meta.get('info_mtime') != mtime:
-                info = media.probe_info(path)
             shots_ok = shots and meta.get('shots_mtime') == mtime and all(
                 os.path.exists(os.path.join(media.shots_dir(path), s)) for s in shots)
-            if force_shots or not shots_ok:
-                shots = media.make_screenshots(path, info.get('duration') or 0)
+            if kind == 'photo':
+                if force_shots or not shots_ok or not info or meta.get('info_mtime') != mtime:
+                    info, shots = media.process_image(path)
+            else:
+                if not info or meta.get('info_mtime') != mtime:
+                    info = media.probe_info(path)
+                if force_shots or not shots_ok:
+                    shots = media.make_screenshots(path, info.get('duration') or 0)
             source = None if meta.get('source_checked') else self._lookup_source(path)
 
             with self._lock:                     # merge: the user may have edited tags meanwhile
                 entry = self.entries.get(vid)
                 if not entry:
                     return
+                self._sync_meta(entry)
                 current = entry['meta']
                 current.update({'info': info, 'info_mtime': mtime, 'shots': shots, 'shots_mtime': mtime,
                                 'source_checked': True})
                 if source and not current.get('source'):
                     current['source'] = source
-                media.save_meta(path, current)
+                self._save(entry)
                 entry['error'] = None
-            if self.matching_ready:
+            if self.matching_ready and kind == 'video':
                 self._match_new(vid)
         except Exception as e:
             logger.warning(f"影片資訊/截圖產生失敗 {vid}: {e}")
@@ -203,11 +239,10 @@ class Library:
 
     @staticmethod
     def _lookup_source(path: str) -> Optional[str]:
-        """Where the file came from, from the bot's download database (same as the chat file viewer)."""
+        """Where the file came from, from the bot's download record (same as the chat file viewer)."""
         try:
-            from src.database import DatabaseManager
             from src.file_viewer import source_link
-            return source_link(DatabaseManager().find_download(path))
+            return source_link(_records().find_download(path))
         except Exception as e:
             logger.debug(f"查詢來源失敗 {path}: {e}")
             return None
@@ -224,6 +259,7 @@ class Library:
         folder = os.path.dirname(entry['rel'])
         return {
             'id': vid,
+            'kind': entry['kind'],
             'title': meta.get('title') or os.path.basename(entry['rel']),
             'file': os.path.basename(entry['rel']),
             'folder': folder,
@@ -257,9 +293,21 @@ class Library:
                 'mime': media.mime_codecs(entry['path'], info),
                 'processing': vid in self._pending,
                 'error': entry.get('error'),
-                'versions': self._versions(vid, entry),
+                'versions': self._versions(vid, entry) if entry['kind'] == 'video' else [],
             })
+            if entry['kind'] == 'photo':
+                data['neighbors'] = self._neighbors(vid, entry)
             return data
+
+    def _neighbors(self, vid: str, entry: dict) -> dict:
+        """Previous / next photo in the same folder (by file name), for ← / → on the photo page."""
+        folder = os.path.dirname(entry['rel'])
+        photos = sorted(((os.path.basename(e['rel']).lower(), i) for i, e in self.entries.items()
+                         if e['kind'] == 'photo' and os.path.dirname(e['rel']) == folder))
+        ids = [i for _, i in photos]
+        pos = ids.index(vid)
+        return {'prev': ids[pos - 1] if pos > 0 else None, 'next': ids[pos + 1] if pos + 1 < len(ids) else None,
+                'index': pos + 1, 'total': len(ids)}
 
     def _versions(self, vid: str, entry: dict) -> List[dict]:
         """All files of this video's group (best quality first), for the line switcher."""
@@ -281,9 +329,10 @@ class Library:
         except OSError:
             return 0
 
-    def list(self) -> List[dict]:
+    def list(self, kind: str = '') -> List[dict]:
+        """All items, or only 'video' / 'photo'."""
         with self._lock:
-            return [self.summary(vid, e) for vid, e in self.entries.items()]
+            return [self.summary(vid, e) for vid, e in self.entries.items() if not kind or e['kind'] == kind]
 
     def tags(self) -> dict:
         actors, series = {}, {}
@@ -313,12 +362,12 @@ class Library:
                 meta['series'] = str(fields['series'] or '').strip()[:200]
             if 'source' in fields:
                 meta['source'] = str(fields['source'] or '').strip()[:2000]
-            media.save_meta(entry['path'], meta)
+            self._save(entry)
             if meta.get('group'):                # title / actors / series are shared by all versions
                 for mid, m in self._group_members(meta['group']):
                     if mid != vid:
                         m['meta'].update({k: meta[k] for k in ('title', 'actors', 'series')})
-                        media.save_meta(m['path'], m['meta'])
+                        self._save(m)
         return self.detail(vid)
 
     def delete(self, vid: str) -> bool:
@@ -327,12 +376,9 @@ class Library:
             if not entry:
                 return False
             os.remove(entry['path'])
-            media.remove_sidecars(entry['path'])
-            try:                                 # hidden compressed copy made by the bot's 「載入影片」
-                from src.video_loader import compressed_path
-                os.remove(compressed_path(entry['path']))
-            except (ImportError, OSError):
-                pass
+            # keeps the download record in .tad/deleted.json (下載紀錄 / not offered again), removes
+            # the sidecars and the bot's 「載入影片」 compressed copy
+            _records().forget_file(entry['path'])
             del self.entries[vid]
             self._dissolve_if_single(entry['meta'].get('group'))
         logger.info(f"影片庫：已刪除 {entry['path']}")
@@ -354,7 +400,7 @@ class Library:
         if len(members) == 1:
             vid, e = members[0]
             e['meta']['group'] = ''
-            media.save_meta(e['path'], e['meta'])
+            self._save(e)
 
     def _signature(self, entry: dict):
         meta = entry['meta']
@@ -412,7 +458,7 @@ class Library:
             series = next((e['meta']['series'] for e in ordered if e['meta'].get('series')), '')
             for e in members.values():
                 e['meta'].update({'group': gid, 'title': title, 'actors': actors, 'series': series})
-                media.save_meta(e['path'], e['meta'])
+                self._save(e)
 
     def _match_new(self, vid: str):
         """A video just got its info / screenshots: group it with a matching version, if any."""
@@ -479,9 +525,9 @@ class Library:
                     continue
                 entry['meta'].setdefault('not_same', []).append(other['meta']['uid'])
                 other['meta'].setdefault('not_same', []).append(entry['meta']['uid'])
-                media.save_meta(other['path'], other['meta'])
+                self._save(other)
             entry['meta']['group'] = ''
-            media.save_meta(entry['path'], entry['meta'])
+            self._save(entry)
             self._dissolve_if_single(gid)
         logger.info(f"影片庫：{entry['rel']} 已從版本群組移出")
         return self.detail(vid)
@@ -518,22 +564,23 @@ class Library:
                 entry = self.entries.get(vid)
                 if entry and (os.path.normcase(entry['path']) == os.path.normcase(path)
                               or os.path.normcase(entry['path']).startswith(prefix)):
-                    raise LibraryError('影片正在產生資訊/截圖，請稍後再試', 409)
+                    raise LibraryError('檔案正在產生資訊/截圖，請稍後再試', 409)
 
     def folders(self) -> List[dict]:
-        """Every (non-hidden) folder with the number of videos directly inside it."""
+        """Every (non-hidden) folder with the number of videos / photos directly inside it."""
         base = self.base()
         direct = {}
         with self._lock:
             for e in self.entries.values():
-                folder = os.path.dirname(e['rel'])
-                direct[folder] = direct.get(folder, 0) + 1
-        out = [{'path': '', 'videos': direct.get('', 0)}]
+                counts = direct.setdefault(os.path.dirname(e['rel']), {'video': 0, 'photo': 0})
+                counts[e['kind']] += 1
+        node = lambda rel: {'path': rel, 'videos': direct.get(rel, {}).get('video', 0),
+                            'photos': direct.get(rel, {}).get('photo', 0)}
+        out = [node('')]
         for root, dirs, _ in os.walk(base):
             dirs[:] = sorted((d for d in dirs if not d.startswith('.')), key=str.lower)
             for d in dirs:
-                rel = self._rel(os.path.join(root, d))
-                out.append({'path': rel, 'videos': direct.get(rel, 0)})
+                out.append(node(self._rel(os.path.join(root, d))))
         return out
 
     def create_folder(self, parent: str, name: str) -> str:
@@ -566,7 +613,7 @@ class Library:
         """Rename the file (the extension is kept when left out); returns the new id."""
         src = self.resolve(vid)
         if not src:
-            raise LibraryError('找不到影片', 404)
+            raise LibraryError('找不到檔案', 404)
         name = check_name(name)
         ext = os.path.splitext(src)[1]
         if os.path.splitext(name)[1].lower() != ext.lower():
@@ -584,7 +631,7 @@ class Library:
             src = self.resolve(str(vid))
             try:
                 if not src:
-                    raise LibraryError('找不到影片', 404)
+                    raise LibraryError('找不到檔案', 404)
                 self._move_video(src, os.path.join(target, os.path.basename(src)))
                 moved.append(os.path.basename(src))
             except (LibraryError, OSError) as e:
@@ -610,6 +657,7 @@ class Library:
             raise LibraryError(f'「{os.path.basename(dst)}」已經存在', 409)
         self._check_not_busy(src)
         shutil.move(src, dst)
+        _records().folder_moved(src, dst)
         logger.info(f"影片庫：{src} -> {dst}")
 
     def _move_video(self, src: str, dst: str):
@@ -627,6 +675,7 @@ class Library:
                         shutil.move(old, new)
                     except OSError as e:
                         logger.warning(f"移動附屬檔失敗 {old}: {e}")
+            _records().file_moved(src, dst)
             if entry:                            # a default title follows the file name
                 meta = entry['meta']
                 if meta.get('title') == os.path.splitext(os.path.basename(src))[0]:

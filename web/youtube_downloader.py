@@ -15,7 +15,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-# Ensure the project root is importable (for src.phasher, src.database)
+# Ensure the project root is importable (for src.phasher, src.records)
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
@@ -88,7 +88,7 @@ class YouTubeDownloader:
         """
         import yt_dlp
         from src.phasher import get_video_phash_from_path
-        from src.database import DatabaseManager
+        from src.records import DownloadRecords
 
         os.makedirs(dest_dir, exist_ok=True)
 
@@ -171,10 +171,10 @@ class YouTubeDownloader:
         file_unique_id = phash if phash else f"yt_{file_size}_{abs(hash(url))}"
 
         # ── Duplicate check ──
-        db = DatabaseManager()
-        if phash and db.is_file_downloaded(file_unique_id):
-            existing = db.get_downloaded_file_info(file_unique_id)
-            existing_path = existing.get('file_path', '未知') if existing else '未知'
+        db = DownloadRecords()
+        existing = db.get_downloaded_file_info(file_unique_id) if phash else None
+        if existing and not existing['deleted'] and os.path.exists(existing['file_path']):
+            existing_path = existing['file_path']
             try:
                 os.remove(file_path)
             except Exception:

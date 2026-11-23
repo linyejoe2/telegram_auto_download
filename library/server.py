@@ -2,7 +2,8 @@
 library/server.py — aiohttp server for the web video library.
 
 Everything lives under PREFIX (/library); "/" answers an empty page.
-  /library/api/...            JSON API (login, videos, tags, edit, delete, rescan)   — login required
+  /library/api/...            JSON API (login, videos / photos, tags, edit, delete, rescan,
+                              download history + download again)                    — login required
   /library/media/<id>/file    original file with HTTP range support (direct play)    — login required
   /library/media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start seconds>    — login required
   /library/media/<id>/shots/  auto screenshots                                       — login required
@@ -25,7 +26,7 @@ from aiohttp import web
 
 from . import media
 from .auth import Sessions, verify_password
-from .store import Library, LibraryError
+from .store import Library, LibraryError, encode_id
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +75,16 @@ def _is_https(request: web.Request) -> bool:
 class LibraryServer:
     def __init__(self, base_path: Callable[[], str], password_hash: str, secret: str,
                  port: int = 8765, host: str = '0.0.0.0', similarity_threshold: Optional[float] = None,
-                 on_grouped: Optional[Callable[[str], None]] = None):
+                 on_grouped: Optional[Callable[[str], None]] = None,
+                 on_redownload: Optional[Callable[[dict], Optional[str]]] = None):
         if not password_hash:
             raise ValueError('尚未設定網頁影片庫密碼')
         self.library = Library(base_path)
         if similarity_threshold:
             self.library.threshold = similarity_threshold
         self.library.on_grouped = on_grouped
+        # download a deleted file again through the running bot: returns an error text or None
+        self.on_redownload = on_redownload
         self.sessions = Sessions(secret, password_hash)
         self.password_hash = password_hash
         self.port, self.host = port, host
@@ -110,8 +114,11 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/folders/delete', self.delete_folder)
         r.add_post(PREFIX + '/api/videos/{id}/rename', self.rename_video)
         r.add_post(PREFIX + '/api/videos/{id}/ungroup', self.ungroup_video)
+        r.add_post(PREFIX + '/api/videos/{id}/redownload', self.redownload_video)
         r.add_post(PREFIX + '/api/move', self.move)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
+        r.add_get(PREFIX + '/api/history', self.history)
+        r.add_post(PREFIX + '/api/history/redownload', self.redownload)
         r.add_get(PREFIX + '/media/{id}/file', self.media_file)
         r.add_get(PREFIX + '/media/{id}/stream', self.media_stream)
         r.add_get(PREFIX + '/media/{id}/shots/{name}', self.media_shot)
@@ -179,7 +186,9 @@ class LibraryServer:
                                   'last_scan': self.library.last_scan})
 
     async def list_videos(self, request: web.Request):
-        return web.json_response({'videos': self.library.list(), 'processing': self.library.processing})
+        kind = request.query.get('kind', '')
+        kind = kind if kind in ('video', 'photo') else ''
+        return web.json_response({'videos': self.library.list(kind), 'processing': self.library.processing})
 
     def _detail_or_404(self, vid: str):
         data = self.library.detail(vid)
@@ -188,7 +197,31 @@ class LibraryServer:
         return data
 
     async def get_video(self, request: web.Request):
-        return web.json_response(self._detail_or_404(request.match_info['id']))
+        data = self._detail_or_404(request.match_info['id'])
+        if data.get('error'):                     # broken file: say whether / how it can be downloaded again
+            path = self.library.resolve(data['id'])
+            plan, note = None, ''
+            if path:
+                plan, note = await asyncio.get_running_loop().run_in_executor(
+                    None, self._records().plan_redownload, path)
+            data['redownload'] = {'possible': bool(plan), 'note': note, 'bot': self.on_redownload is not None}
+        return web.json_response(data)
+
+    async def redownload_video(self, request: web.Request):
+        """Download a broken file again (it is replaced once the source is reachable)."""
+        path = self.library.resolve(request.match_info['id'])
+        if not path:
+            return web.json_response({'error': 'not found'}, status=404)
+        if self.on_redownload is None:
+            return web.json_response({'error': '這台電腦的程式沒有在執行 Bot，無法重新下載'}, status=503)
+        plan, note = await asyncio.get_running_loop().run_in_executor(None, self._records().plan_redownload, path)
+        if not plan:
+            return web.json_response({'error': note}, status=404)
+        error = self.on_redownload(plan, path)
+        if error:
+            return web.json_response({'error': error}, status=503)
+        logger.info(f"影片庫：重新下載損毀的檔案 {path}（{note}）")
+        return web.json_response({'ok': True, 'note': note}, status=202)
 
     async def update_video(self, request: web.Request):
         try:
@@ -278,6 +311,43 @@ class LibraryServer:
     async def rescan(self, request: web.Request):
         count = await asyncio.get_running_loop().run_in_executor(None, self.library.scan)
         return web.json_response({'videos': count, 'processing': self.library.processing})
+
+    # ── download history (src/records.py) ──
+
+    @staticmethod
+    def _records():
+        from src.records import DownloadRecords
+        return DownloadRecords()
+
+    async def history(self, request: web.Request):
+        q = request.query
+        try:
+            offset, limit = int(q.get('offset', 0)), int(q.get('limit', 100))
+        except ValueError:
+            offset, limit = 0, 100
+        data = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: self._records().history(q.get('q', ''), q.get('status', ''), q.get('kind', ''), offset, limit))
+        with self.library._lock:
+            for item in data['items']:            # existing videos / photos open their page in the library
+                vid = encode_id(item['rel']) if item['inside'] and not item['deleted'] else None
+                item['id'] = vid if vid in self.library.entries else None
+        data['redownload'] = self.on_redownload is not None
+        return web.json_response(data)
+
+    async def redownload(self, request: web.Request):
+        key = str((await self._body(request)).get('key') or '')
+        record = await asyncio.get_running_loop().run_in_executor(None, self._records().get, key)
+        if not record:
+            return web.json_response({'error': '找不到這筆下載紀錄'}, status=404)
+        if not record['deleted']:
+            return web.json_response({'error': '檔案還在，不需要重新下載'}, status=409)
+        if self.on_redownload is None:
+            return web.json_response({'error': '這台電腦的程式沒有在執行 Bot，無法重新下載'}, status=503)
+        error = self.on_redownload(record)
+        if error:
+            return web.json_response({'error': error}, status=503)
+        logger.info(f"影片庫：重新下載 {record.get('file_name')}")
+        return web.json_response({'ok': True}, status=202)
 
     # ── media ──
 

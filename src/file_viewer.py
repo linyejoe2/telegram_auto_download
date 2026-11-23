@@ -474,6 +474,7 @@ class FileViewer:
                 state.rel_path = os.path.dirname(state.rel_path)
             else:
                 os.remove(path)
+                self._forget(path)
             logger.info(f"檔案瀏覽：已刪除 {path}")
             note = f"🗑 已刪除「{name}」\n\n"
         except OSError as e:
@@ -601,10 +602,20 @@ class FileViewer:
         return ViewResult("\n".join(lines), InlineKeyboardMarkup(keyboard))
 
     @staticmethod
+    def _forget(path: str):
+        """Keep the download record (not offered again, listed in the web library's 下載紀錄) and
+        remove the file's hidden sidecars."""
+        try:
+            from .records import DownloadRecords
+            DownloadRecords().forget_file(path)
+        except Exception as e:
+            logger.warning(f"更新下載記錄失敗 {path}: {e}")
+
+    @staticmethod
     def _find_record(path: str) -> Optional[dict]:
         try:
-            from .database import DatabaseManager
-            return DatabaseManager().find_download(path)
+            from .records import DownloadRecords
+            return DownloadRecords().find_download(path)
         except Exception as e:
             logger.warning(f"查詢下載記錄失敗: {e}")
             return None

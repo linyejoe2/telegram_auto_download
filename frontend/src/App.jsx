@@ -4,6 +4,7 @@ import { api, Unauthorized } from './api.js'
 import Login from './pages/Login.jsx'
 import Library from './pages/Library.jsx'
 import VideoPage from './pages/VideoPage.jsx'
+import History from './pages/History.jsx'
 
 export default function App() {
   const [authed, setAuthed] = useState(null) // null = checking
@@ -25,6 +26,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Library guard={guard} onLogout={() => setAuthed(false)} />} />
       <Route path="/v/:id" element={<VideoPage guard={guard} />} />
+      <Route path="/history" element={<History guard={guard} />} />
       <Route path="*" element={<Library guard={guard} onLogout={() => setAuthed(false)} />} />
     </Routes>
   )

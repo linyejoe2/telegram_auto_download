@@ -1,11 +1,12 @@
 """
-library/media.py — Per-video metadata stored next to the video (hidden, so the chat file viewer skips it).
+library/media.py — Per-file metadata stored next to the file (hidden, so the chat file viewer skips it).
 
   <folder>/video.mp4
-  <folder>/.video.mp4.meta.json     title, actors, series, source, cached video info
-  <folder>/.video.mp4.shots/01.jpg  auto screenshots shown before playback
+  <folder>/.video.mp4.meta.json     title, actors, series, source, cached video info,
+                                    "download": the bot's download record (owned by src/records.py, v3.3.0)
+  <folder>/.video.mp4.shots/01.jpg  auto screenshots shown before playback (photos: one thumbnail)
 
-Blocking functions (ffprobe / ffmpeg): call them from a worker thread.
+Blocking functions (ffprobe / ffmpeg / OpenCV): call them from a worker thread.
 """
 
 import json
@@ -14,16 +15,20 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.wmv', '.flv', '.m4v', '.ts'}
+IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 SHOT_COUNT = 9
 SHOT_WIDTH = 640
+THUMB_MAX = (640, 1280)          # photo thumbnail: at most this wide / tall
 META_VERSION = 1
+_meta_lock = threading.RLock()   # the library and the bot (download records) both write sidecars
 
 # what browsers play without help (the frontend still double-checks with canPlayType)
 DIRECT_CONTAINERS = {'.mp4', '.m4v', '.webm', '.mov'}
@@ -35,6 +40,18 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
 def is_video(name: str) -> bool:
     return not name.startswith('.') and os.path.splitext(name)[1].lower() in VIDEO_EXTS
+
+
+def is_image(name: str) -> bool:
+    return not name.startswith('.') and os.path.splitext(name)[1].lower() in IMAGE_EXTS
+
+
+def is_media(name: str) -> bool:
+    return is_video(name) or is_image(name)
+
+
+def kind_of(name: str) -> str:
+    return 'photo' if is_image(name) else 'video'
 
 
 def meta_path(video: str) -> str:
@@ -91,13 +108,48 @@ def load_meta(video: str) -> dict:
     return meta
 
 
-def save_meta(video: str, meta: dict):
+def read_sidecar(video: str) -> dict:
+    """The sidecar as stored (no defaults); {} if there is none."""
+    try:
+        with open(meta_path(video), encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        logger.warning(f"讀取資訊檔失敗 {video}: {e}")
+        return {}
+
+
+def _write_sidecar(video: str, data: dict):
     path = meta_path(video)
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
     _hide(path)
+
+
+def save_meta(video: str, meta: dict):
+    """Write the library's fields; the "download" record on disk is kept as is (src/records.py owns it)."""
+    with _meta_lock:
+        stored = read_sidecar(video).get('download')
+        data = {k: v for k, v in meta.items() if k != 'download'}
+        if stored:
+            data['download'] = stored
+        _write_sidecar(video, data)
+
+
+def set_download(video: str, record: dict, defaults: Optional[dict] = None):
+    """Store the bot's download record in the file's sidecar (creating it if needed);
+    `defaults` fill library fields that aren't set yet (e.g. a title kept from before a deletion)."""
+    with _meta_lock:
+        data = read_sidecar(video) or {'version': META_VERSION}
+        data['download'] = record
+        for key, value in (defaults or {}).items():
+            if not data.get(key):
+                data[key] = value
+        _write_sidecar(video, data)
 
 
 def _hide(path: str):
@@ -237,6 +289,51 @@ def make_screenshots(video: str, duration: float, count: int = SHOT_COUNT) -> Li
     if not names:
         raise RuntimeError('無法擷取影片截圖')
     return names
+
+
+# ─── photos ──────────────────────────────────────────────────────────────────
+
+def process_image(path: str) -> Tuple[dict, List[str]]:
+    """Info (size, format, bit depth) and a thumbnail (.shots/01.jpg) of a photo. Raises RuntimeError."""
+    ext = os.path.splitext(path)[1].lower()
+    folder = shots_dir(path)
+    if os.path.isdir(folder):
+        shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder, exist_ok=True)
+    _hide(folder)
+    out = os.path.join(folder, '01.jpg')
+    size = os.path.getsize(path)
+
+    if ext == '.gif':                               # animated: ffmpeg takes the first frame
+        info = probe_info(path)
+        info = {'width': info.get('width'), 'height': info.get('height'), 'size': size, 'format': 'GIF',
+                'bit_depth': 8, 'channels': None, 'duration': info.get('duration') or None}
+        make_screenshots(path, 0, count=1)
+        return info, ['01.jpg']
+
+    import cv2
+    import numpy as np
+    data = np.fromfile(path, dtype=np.uint8)          # cv2.imread can't open non-ASCII paths on Windows
+    image = cv2.imdecode(data, cv2.IMREAD_COLOR)      # applies the EXIF rotation, like browsers do
+    if image is None:
+        raise RuntimeError('無法讀取圖片（檔案不完整或格式不支援）')
+    height, width = image.shape[:2]
+    bit_depth, channels = 8, 3
+    if ext == '.png':                                 # the only common format with 16-bit / alpha
+        raw = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+        if raw is not None:
+            bit_depth = 16 if raw.dtype == np.uint16 else 8
+            channels = 1 if raw.ndim == 2 else raw.shape[2]
+    scale = min(1.0, THUMB_MAX[0] / width, THUMB_MAX[1] / height)
+    thumb = cv2.resize(image, (max(1, round(width * scale)), max(1, round(height * scale))),
+                       interpolation=cv2.INTER_AREA) if scale < 1 else image
+    ok, encoded = cv2.imencode('.jpg', thumb, [cv2.IMWRITE_JPEG_QUALITY, 82])
+    if not ok:
+        raise RuntimeError('無法產生縮圖')
+    encoded.tofile(out)
+    fmt = {'.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG', '.webp': 'WebP', '.bmp': 'BMP'}.get(ext, ext[1:].upper())
+    return {'width': width, 'height': height, 'size': size, 'format': fmt,
+            'bit_depth': bit_depth, 'channels': channels}, ['01.jpg']
 
 
 def remove_sidecars(video: str):

@@ -24,7 +24,9 @@ export const api = {
   session: () => request('GET', `${API}/session`),
   login: (password) => request('POST', `${API}/login`, { password }),
   logout: () => request('POST', `${API}/logout`),
-  videos: () => request('GET', `${API}/videos`),
+  videos: (kind) => request('GET', `${API}/videos${kind ? `?kind=${kind}` : ''}`),
+  history: (params) => request('GET', `${API}/history?${new URLSearchParams(params)}`),
+  redownload: (key) => request('POST', `${API}/history/redownload`, { key }),
   video: (id) => request('GET', `${API}/videos/${id}`),
   update: (id, fields) => request('PATCH', `${API}/videos/${id}`, fields),
   remove: (id) => request('DELETE', `${API}/videos/${id}`),
@@ -38,6 +40,7 @@ export const api = {
   renameVideo: (id, name) => request('POST', `${API}/videos/${id}/rename`, { name }),
   move: (videos, folders, dest) => request('POST', `${API}/move`, { videos, folders, dest }),
   ungroup: (id) => request('POST', `${API}/videos/${id}/ungroup`),
+  redownloadVideo: (id) => request('POST', `${API}/videos/${id}/redownload`),
 }
 
 // drag & drop payload between video items and folder tree nodes
@@ -60,6 +63,30 @@ export function getDragItems(e) {
 export function qualityKey(v) {
   return Math.min(v.width || 0, v.height || 0) * 1e9 + (v.bit_rate || 0)
 }
+
+// what the library shows: 影片 / 圖片 / 全部 (kept in the URL as ?kind=, remembered per browser)
+export const KINDS = {
+  video: { label: '影片', title: '影片庫', unit: '部' },
+  photo: { label: '圖片', title: '圖片庫', unit: '張' },
+  all: { label: '全部', title: '媒體庫', unit: '個' },
+}
+
+export function storedKind() {
+  try {
+    const k = localStorage.getItem('tad.kind')
+    return KINDS[k] ? k : 'all'
+  } catch {
+    return 'all'
+  }
+}
+
+export function rememberKind(kind) {
+  try {
+    localStorage.setItem('tad.kind', kind)
+  } catch {}
+}
+
+export const dimensions = (w, h) => (w && h ? `${w}×${h}` : null)
 
 export const baseName = (path) => path.split('/').pop()
 export const parentOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')

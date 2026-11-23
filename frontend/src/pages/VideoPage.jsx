@@ -19,7 +19,8 @@ export default function VideoPage({ guard }) {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  const backTo = location.state?.back ? `/?${location.state.back}` : '/'
+  // came from the library (its filters) or from 下載紀錄 (backPath)
+  const backTo = location.state?.backPath || (location.state?.back ? `/?${location.state.back}` : '/')
 
   const [video, setVideo] = useState(null)
   const [error, setError] = useState('')
@@ -28,6 +29,7 @@ export default function VideoPage({ guard }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [playFrom, setPlayFrom] = useState(null) // null = show screenshots, number = playing from there
+  const [redl, setRedl] = useState(null) // broken file: null | 'busy' | { ok, text }
   const playTime = useRef(0) // where the player is, so switching version continues there
 
   async function load() {
@@ -47,11 +49,31 @@ export default function VideoPage({ guard }) {
 
   useEffect(() => {
     setForm(null)
+    setRedl(null)
     // switching version keeps playing at the same time
     setPlayFrom(location.state?.resume ?? null)
     load()
     api.tags().then(setTags).catch(() => {})
   }, [id])
+
+  // photos: ← / → step through the photos of the same folder
+  useEffect(() => {
+    if (video?.kind !== 'photo') return
+    function onKey(e) {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.altKey || e.ctrlKey || e.metaKey) return
+      const target = e.key === 'ArrowLeft' ? video.neighbors?.prev : e.key === 'ArrowRight' ? video.neighbors?.next : null
+      if (target) {
+        e.preventDefault()
+        goTo(target)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [video])
+
+  function goTo(otherId) {
+    navigate(`/v/${otherId}`, { replace: true, state: location.state })
+  }
 
   // screenshots / info still being generated: poll until ready
   useEffect(() => {
@@ -106,20 +128,42 @@ export default function VideoPage({ guard }) {
     }
   }
 
+  async function redownload() {
+    const note = video.redownload?.note ? `\n${video.redownload.note}` : ''
+    if (!window.confirm(`重新下載「${video.file}」？${note}\n\n找到來源後會刪除這個損毀的檔案、下載新的一份到同一個資料夾；進度會顯示在 Telegram。`)) return
+    setRedl('busy')
+    try {
+      await api.redownloadVideo(id)
+      setRedl({ ok: true, text: '已加入 Bot 的下載佇列，進度會顯示在 Telegram。下載完成、影片庫重新掃描後（約 1–2 分鐘）就會出現新的檔案。' })
+    } catch (err) {
+      try {
+        guard(err)
+      } catch (e) {
+        setRedl({ ok: false, text: e.message })
+      }
+    }
+  }
+
   async function remove() {
-    if (!window.confirm(`確定要刪除「${video.file}」嗎？\n影片檔與它的資訊、截圖都會刪除，無法復原。`)) return
+    const what = video.kind === 'photo' ? '圖片' : '影片'
+    if (!window.confirm(`確定要刪除「${video.file}」嗎？\n${what}檔與它的資訊、截圖都會刪除，無法復原。\n（下載紀錄會保留，之後可在「下載紀錄」重新下載）`)) return
     try {
       await api.remove(id)
-      navigate(backTo, { replace: true })
+      const next = video.neighbors?.next || video.neighbors?.prev // photos: continue with the next one
+      if (next) goTo(next)
+      else navigate(backTo, { replace: true })
     } catch (err) {
       alert(err.message)
     }
   }
 
-  if (error) return <p className="p-8 text-red-400">{error === 'not found' ? '找不到這部影片' : error}</p>
+  if (error) return <p className="p-8 text-red-400">{error === 'not found' ? '找不到這個檔案' : error}</p>
   if (!video || !form) return <p className="p-8 text-neutral-400">載入中…</p>
 
   const info = video.info || {}
+  const photo = video.kind === 'photo'
+  const nav = video.neighbors || {}
+  const fileUrl = `${MEDIA}/${video.id}/file`
   const duration = info.duration || video.duration || 0
   const shotTime = (i) => (duration * (i + 1)) / (video.shots.length + 1)
   const dirty =
@@ -137,7 +181,62 @@ export default function VideoPage({ guard }) {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section className="space-y-4">
-          {playFrom !== null ? (
+          {video.error && (
+            <div className="space-y-2 rounded-xl bg-red-950/50 p-4 text-sm ring-1 ring-red-500/30">
+              <p className="text-red-200">⚠ {photo ? '無法讀取這張圖片' : '無法產生截圖'}：{video.error}</p>
+              {video.redownload && <p className="text-xs text-neutral-400">{video.redownload.note}</p>}
+              {redl?.text ? (
+                <p className={redl.ok ? 'text-emerald-300' : 'text-red-300'}>{redl.text}</p>
+              ) : null}
+              {!redl?.ok && (
+                <button
+                  onClick={redownload}
+                  disabled={redl === 'busy' || !video.redownload?.possible || !video.redownload?.bot}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium hover:bg-accent-hover disabled:opacity-40"
+                  title={
+                    !video.redownload?.bot ? '這台電腦的程式沒有在執行 Bot' : !video.redownload?.possible ? video.redownload?.note : '從來源重新下載這個檔案'
+                  }
+                >
+                  {redl === 'busy' ? '送出中…' : '⬇ 重新下載'}
+                </button>
+              )}
+              {video.redownload && !video.redownload.bot && (
+                <p className="text-xs text-amber-300">這台電腦的程式沒有在執行 Bot，暫時無法重新下載。</p>
+              )}
+            </div>
+          )}
+          {photo ? (
+            <div className="relative flex min-h-[40vh] items-center justify-center overflow-hidden rounded-xl bg-black">
+              <a href={fileUrl} target="_blank" rel="noreferrer" title="開啟原圖">
+                <img key={video.id} src={fileUrl} alt={video.title} className="max-h-[80vh] w-auto max-w-full object-contain" />
+              </a>
+              {nav.prev && (
+                <button
+                  onClick={() => goTo(nav.prev)}
+                  className="absolute left-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80"
+                  aria-label="上一張"
+                  title="上一張（←）"
+                >
+                  ‹
+                </button>
+              )}
+              {nav.next && (
+                <button
+                  onClick={() => goTo(nav.next)}
+                  className="absolute right-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80"
+                  aria-label="下一張"
+                  title="下一張（→）"
+                >
+                  ›
+                </button>
+              )}
+              {nav.total > 1 && (
+                <span className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-xs tabular-nums">
+                  {nav.index} / {nav.total}
+                </span>
+              )}
+            </div>
+          ) : playFrom !== null ? (
             <Player key={`${id}-${playFrom}`} video={video} startAt={playFrom} onTime={(t) => (playTime.current = t)} />
           ) : (
             <>
@@ -160,7 +259,7 @@ export default function VideoPage({ guard }) {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-neutral-500">{video.error ? `無法產生截圖：${video.error}` : '截圖產生中…'}</p>
+                <p className="text-sm text-neutral-500">{video.error ? '沒有截圖' : '截圖產生中…'}</p>
               )}
             </>
           )}
@@ -196,7 +295,7 @@ export default function VideoPage({ guard }) {
 
         <aside className="space-y-6">
           <form onSubmit={save} className="space-y-3 rounded-xl bg-neutral-900 p-4 ring-1 ring-white/5">
-            <h2 className="font-medium">影片資訊</h2>
+            <h2 className="font-medium">{photo ? '圖片資訊' : '影片資訊'}</h2>
             <label className="block space-y-1">
               <span className="text-xs text-neutral-400">標題</span>
               <input className={field} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -233,6 +332,15 @@ export default function VideoPage({ guard }) {
             </button>
           </form>
 
+          {photo ? (
+            <div className="rounded-xl bg-neutral-900 p-4 ring-1 ring-white/5">
+              <h2 className="mb-2 font-medium">Photo Info</h2>
+              <InfoRow label="長寬">{info.width ? `${info.width} × ${info.height}` : null}</InfoRow>
+              <InfoRow label="格式">{info.format}</InfoRow>
+              <InfoRow label="Bit depth">{info.bit_depth ? `${info.bit_depth}-bit` : null}</InfoRow>
+              <InfoRow label="檔案大小">{fmtSize(info.size || video.size)}</InfoRow>
+              <InfoRow label="位置">{`${video.folder ? video.folder + '/' : ''}${video.file}`}</InfoRow>            </div>
+          ) : (
           <div className="rounded-xl bg-neutral-900 p-4 ring-1 ring-white/5">
             <h2 className="mb-2 font-medium">Video Info</h2>
             <InfoRow label="長寬">{info.width ? `${info.width} × ${info.height}` : null}</InfoRow>
@@ -246,13 +354,16 @@ export default function VideoPage({ guard }) {
             <InfoRow label="播放方式">{video.direct ? '原始檔（不支援時自動轉檔）' : '即時轉檔'}</InfoRow>
             <InfoRow label="位置">{`${video.folder ? video.folder + '/' : ''}${video.file}`}</InfoRow>
           </div>
+          )}
 
           <div className="flex flex-wrap gap-2">
-            <a href={`${MEDIA}/${video.id}/file`} download={video.file} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">下載原檔</a>
+            <a href={fileUrl} download={video.file} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">下載原檔</a>
             <button onClick={regenerate} disabled={video.processing} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50">
-              {video.processing ? '處理中…' : '重新產生截圖'}
+              {video.processing ? '處理中…' : photo ? '重新產生縮圖' : '重新產生截圖'}
             </button>
-            <button onClick={remove} className="ml-auto rounded-lg bg-red-900/60 px-3 py-1.5 text-sm text-red-100 hover:bg-red-800">刪除影片</button>
+            <button onClick={remove} className="ml-auto rounded-lg bg-red-900/60 px-3 py-1.5 text-sm text-red-100 hover:bg-red-800">
+              {photo ? '刪除圖片' : '刪除影片'}
+            </button>
           </div>
         </aside>
       </div>

@@ -6,7 +6,7 @@ import json
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 from telethon.errors import FloodWaitError, RPCError
 from telethon import TelegramClient
-from .database import DatabaseManager
+from .records import DownloadRecords
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 class MediaDownloader:
     """處理媒體文件下載的類"""
     
-    def __init__(self, client: TelegramClient, max_concurrent_downloads=5, db_path=None):
+    def __init__(self, client: TelegramClient, max_concurrent_downloads=5):
         self.client = client
         self.max_concurrent_downloads = max_concurrent_downloads
         self.download_semaphore = asyncio.Semaphore(max_concurrent_downloads)
         self.monitor = None
-        self.db = DatabaseManager(db_path)
+        self.db = DownloadRecords()   # records live next to the files (src/records.py)
         self.message_callback = None
     
     def set_monitor(self, monitor):
@@ -134,6 +134,41 @@ class MediaDownloader:
         
         return False
 
+    @staticmethod
+    def file_name_for(message):
+        """(file name, file type, original name, mime type) a message's media is saved as, or None.
+
+        Photos: photo_<msg id>_<date>.jpg; documents (videos, GIFs...): <msg id>_<original name>, or
+        document_<msg id>_<date><ext> without one. Also used to recognise a file's source message
+        when it has no download record (re-download of a broken video).
+        """
+        if isinstance(message.media, MessageMediaPhoto):
+            return f"photo_{message.id}_{message.date.strftime('%Y%m%d_%H%M%S')}.jpg", "photo", "", None
+        if not isinstance(message.media, MessageMediaDocument):
+            return None
+        document = message.media.document
+        original_name, file_extension = "", ""
+        for attr in document.attributes:
+            if hasattr(attr, 'file_name') and attr.file_name:
+                original_name = attr.file_name
+                file_extension = os.path.splitext(attr.file_name)[1]
+                break
+        mime_type = document.mime_type or ''
+        if not file_extension:                     # 沒有副檔名：根據 MIME 類型推斷
+            if mime_type.startswith('video/'):
+                file_extension = '.mp4'
+            elif mime_type.startswith('image/'):
+                file_extension = '.gif' if 'gif' in mime_type else '.jpg'
+            elif mime_type.startswith('audio/'):
+                file_extension = '.mp3'
+            else:
+                file_extension = '.bin'
+        if original_name:
+            file_name = f"{message.id}_{original_name}"
+        else:
+            file_name = f"document_{message.id}_{message.date.strftime('%Y%m%d_%H%M%S')}{file_extension}"
+        return file_name, "document", original_name, mime_type or None
+
     async def download_media_from_message(self, message, download_dir):
         """從訊息中下載媒體文件"""
         if not message.media:
@@ -157,63 +192,18 @@ class MediaDownloader:
         try:
             os.makedirs(download_dir, exist_ok=True)
             downloaded_files = []
-            
-            # 處理照片
-            if isinstance(message.media, MessageMediaPhoto):
-                file_name = f"photo_{message.id}_{message.date.strftime('%Y%m%d_%H%M%S')}.jpg"
+            named = self.file_name_for(message)
+            if named:
+                file_name, file_type, original_name, mime_type = named
                 file_path = os.path.join(download_dir, file_name)
-                
+                label = "照片" if file_type == "photo" else "文檔"
                 if await self.download_media_with_retry(message, file_path):
                     downloaded_files.append(file_name)
-                    logger.info(f"下載照片: {file_name}")
-                    # 記錄到資料庫
-                    self._record_download_to_db(message, file_name, file_path, "photo", download_dir)
+                    logger.info(f"下載{label}: {file_name}")
+                    self._record_download_to_db(message, file_name, file_path, file_type, download_dir,
+                                                original_name or None, mime_type)
                 else:
-                    logger.error(f"照片下載失敗: {file_name}")
-                
-            # 處理文檔（影片、GIF等）
-            elif isinstance(message.media, MessageMediaDocument):
-                document = message.media.document
-                
-                # 獲取文件副檔名
-                file_extension = ""
-                original_name = ""
-                
-                for attr in document.attributes:
-                    if hasattr(attr, 'file_name') and attr.file_name:
-                        original_name = attr.file_name
-                        file_extension = os.path.splitext(attr.file_name)[1]
-                        break
-                
-                # 如果沒有副檔名，根據 MIME 類型推斷
-                if not file_extension:
-                    mime_type = document.mime_type
-                    if mime_type.startswith('video/'):
-                        file_extension = '.mp4'
-                    elif mime_type.startswith('image/'):
-                        file_extension = '.gif' if 'gif' in mime_type else '.jpg'
-                    elif mime_type.startswith('audio/'):
-                        file_extension = '.mp3'
-                    else:
-                        file_extension = '.bin'
-                
-                # 使用原檔名或生成新檔名
-                if original_name:
-                    file_name = f"{message.id}_{original_name}"
-                else:
-                    file_name = f"document_{message.id}_{message.date.strftime('%Y%m%d_%H%M%S')}{file_extension}"
-                
-                file_path = os.path.join(download_dir, file_name)
-                
-                if await self.download_media_with_retry(message, file_path):
-                    downloaded_files.append(file_name)
-                    logger.info(f"下載文檔: {file_name}")
-                    # 記錄到資料庫
-                    mime_type = document.mime_type if document else None
-                    self._record_download_to_db(message, file_name, file_path, "document", download_dir, original_name, mime_type)
-                else:
-                    logger.error(f"文檔下載失敗: {file_name}")
-            
+                    logger.error(f"{label}下載失敗: {file_name}")
             return downloaded_files
             
         except Exception as e:

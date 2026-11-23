@@ -200,8 +200,8 @@ class XProfileDownloader:
         await processing_msg.edit_text("\n".join(lines))
 
     async def _download_media(self, scan: ProfileScan, dest: str, msg):
-        from src.database import DatabaseManager
-        db = DatabaseManager()
+        from src.records import DownloadRecords
+        db = DownloadRecords()
         loop = asyncio.get_event_loop()
         sem = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
         counts = {'ok': 0, 'skipped': 0, 'failed': 0}

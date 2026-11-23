@@ -19,7 +19,7 @@ hiddenimports = [
     'src.downloader', 
     'src.monitor',
     'src.folder_navigator',
-    'src.database',
+    'src.records',
     'src.ui',
     'config',
     'config.config',

@@ -51,7 +51,9 @@ async def main():
             library = LibraryServer(lambda: os.getenv('DOWNLOADS_PATH') or DOWNLOADS_DIR, web['password_hash'],
                                     web['secret'], port=web['port'], host=web['host'],
                                     similarity_threshold=web['similarity'],
-                                    on_grouped=lambda text: bot.notify_owner_threadsafe(loop, text))
+                                    on_grouped=lambda text: bot.notify_owner_threadsafe(loop, text),
+                                    on_redownload=lambda record, replace=None: bot.request_redownload_threadsafe(
+                                        loop, record, replace))
             await library.start()
             print(f"🎬 Web library: http://localhost:{web['port']}/library/")
 

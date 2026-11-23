@@ -20,12 +20,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .bot import log_queue, TelegramMediaBot
 import config.config as bot_config
-from .database import DatabaseManager
+from .records import DownloadRecords
 from config.config import validate_config, get_web_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.2.0"
+        self.version = "v3.3.1"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -351,7 +351,8 @@ class TelegramBotGUI:
             server = LibraryServer(
                 lambda: os.getenv('DOWNLOADS_PATH') or bot_config.DOWNLOADS_DIR,
                 settings['password_hash'], settings['secret'], port=settings['port'], host=settings['host'],
-                similarity_threshold=settings['similarity'], on_grouped=self._notify_owner)
+                similarity_threshold=settings['similarity'], on_grouped=self._notify_owner,
+                on_redownload=self._redownload)
             server.start_in_thread()
         except Exception as e:
             logging.error(f"Web library failed to start: {e}")
@@ -369,6 +370,14 @@ class TelegramBotGUI:
         bot, loop = getattr(self, 'bot', None), self.bot_loop
         if bot and loop and self.bot_running:
             bot.notify_owner_threadsafe(loop, text)
+
+    def _redownload(self, record, replace=None):
+        """Web library: download a deleted (下載紀錄) or broken (`replace`) file again through the
+        running bot; returns an error text or None."""
+        bot, loop = getattr(self, 'bot', None), self.bot_loop
+        if not (bot and loop and self.bot_running):
+            return 'Bot 沒有在執行：請先在 Windows 程式按 Start Bot'
+        return bot.request_redownload_threadsafe(loop, record, replace)
 
     def stop_web(self):
         if self.web_server:
@@ -802,7 +811,7 @@ class TelegramBotGUI:
     def refresh_statistics(self):
         """Refresh download statistics"""
         try:
-            db = DatabaseManager()
+            db = DownloadRecords()
             stats = db.get_download_statistics()
             
             # Update main statistics labels
@@ -838,7 +847,7 @@ class TelegramBotGUI:
                 self.downloads_tree.delete(item)
             
             # Get recent downloads
-            db = DatabaseManager()
+            db = DownloadRecords()
             downloads = db.get_recent_downloads(limit=100)  # Show last 100 downloads
             
             # Populate treeview

@@ -3,7 +3,7 @@ import { baseName, getDragItems, parentOf, setDragItems, DRAG_TYPE } from '../ap
 
 // Left-side folder tree: click to filter, drag a video / folder onto a folder to move it there,
 // right-click (or ⋯) for rename / new sub folder / delete.
-export default function FolderTree({ folders, selected, onSelect, onDrop, onMenu, onAdd }) {
+export default function FolderTree({ folders, selected, onSelect, onDrop, onMenu, onAdd, rootLabel = '全部' }) {
   const [open, setOpen] = useState(() => new Set(['']))
   const [over, setOver] = useState(null)
 
@@ -99,7 +99,7 @@ export default function FolderTree({ folders, selected, onSelect, onDrop, onMenu
             {isOpen ? '▾' : '▸'}
           </button>
           <span className="shrink-0">{isRoot ? '🏠' : isOpen && kids.length ? '📂' : '📁'}</span>
-          <span className="truncate" title={path || '全部影片'}>{isRoot ? '全部影片' : baseName(path)}</span>
+          <span className="truncate" title={path || rootLabel}>{isRoot ? rootLabel : baseName(path)}</span>
           <span className="ml-auto shrink-0 pl-1 text-xs tabular-nums text-neutral-500">{totals[path] || ''}</span>
           <button
             onClick={(e) => {
@@ -133,7 +133,7 @@ export default function FolderTree({ folders, selected, onSelect, onDrop, onMenu
       <ul>
         {renderNode('', 0)}
       </ul>
-      <p className="px-1 text-[11px] leading-snug text-neutral-600">拖曳影片或資料夾到資料夾上即可移動；右鍵可重新命名</p>
+      <p className="px-1 text-[11px] leading-snug text-neutral-600">拖曳影片、圖片或資料夾到資料夾上即可移動；右鍵可重新命名</p>
     </div>
   )
 }

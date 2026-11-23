@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v3.2.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, SQLite database for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v3.3.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, per-file download records (hidden sidecars, no database, v3.3.0) for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -69,10 +69,10 @@ setup_build_env.bat
 - **src/bot.py**: Main bot logic and message handling (`TelegramMediaBot` class)
 - **src/downloader.py**: Media download operations with concurrent processing (`MediaDownloader` class)
 - **src/monitor.py**: Real-time monitoring and progress tracking (`DownloadMonitor` class)
-- **src/database.py**: SQLite database management for download history and metadata; lives at `<DOWNLOADS_PATH>/.tad/downloads.db`, reopens when `DOWNLOADS_PATH` changes, migrates the legacy `<app dir>/downloads.db`, stores `file_path` relative to the downloads folder (v3.2.0)
+- **src/records.py**: `DownloadRecords` (singleton) download history and duplicate prevention; replaces `src/database.py` / `DatabaseManager` and the SQLite database (v3.3.0). Each file's record is the `download` key of its hidden sidecar `.<file>.meta.json` (shared with the web library; keys file_unique_id, file_id, message_id, chat_id, file_name, original_file_name, file_size, file_type, mime_type, download_date, message_date; `file_path` derived from the sidecar location). In-memory index built by walking the folder (`os.scandir`, sidecar reads cached by mtime), rebuilt in a background thread when older than `REFRESH_SECONDS`=120, switches when `DOWNLOADS_PATH` changes. Methods: `is_file_downloaded`, `get_downloaded_file_info` (adds `deleted`), `is_url_downloaded`, `find_download` (own sidecar, fallback a left-behind sidecar with the same name + size), `record_download`, `get_download_statistics`, `get_recent_downloads`, `cleanup_missing_files`, `forget_file(path)`, `file_moved`/`folder_moved`, `all_records`, `history(q, status, kind, offset, limit)`, `get(key)`, `refresh()`. `<downloads>/.tad/deleted.json` (`{"version":1,"records":{uid: record + file_path(rel) + deleted_date}}`): `forget_file()` moves the record there (keeping title/actors/series/source under `library`, removing the sidecars and the bot's compressed copy); deleted downloads count as downloaded (startup scan / `/rescan` don't offer them) and so do sidecars whose file is missing; a new download of the same id or URL removes the deleted entry and restores the kept fields. `plan_redownload(path)` -> `(record, note)` or `(None, reason)` for a broken file (v3.3.1): 1) the file's own sidecar record; 2) a deleted / left-behind record with the same file name (same size first, then same folder); 3) no record (interrupted downloads): the Telegram message id parsed from the file name (`<id>_<name>`, `photo_<id>_<date>`, `document_<id>_<date>`) plus `_candidate_chats(path)` (channels of recorded files, nearest folder first, then by frequency, max 20) as a guess record with `candidate_chats`; otherwise None ("請把原訊息重新轉傳給 Bot"). Migration on first use: `<downloads>/.tad/downloads.db` (v3.2.0) or the legacy `<app dir>/downloads.db` is imported (existing files -> sidecar `download`, others -> `deleted.json`, UTC `download_date` converted to local time) and renamed `downloads.db.migrated` (v3.3.0)
 - **src/folder_navigator.py**: Interactive folder navigation and path management system
 - **src/file_viewer.py**: Chat file viewer (`FileViewer`, `build_preview`, `source_link`, plus `list_videos`, `build_batch_preview`, `build_frame_preview`, `PreviewBatch` for folder video previews, v2.7.1) for `/files` (v2.7.0)
-- **config/config.py**: Configuration management using environment variables from `.env` file (`get_web_settings()` for the web library, v3.0.0; v3.2.0: `DATA_DIR_NAME = '.tad'`, `get_downloads_dir()`, `get_data_dir()`, `get_database_path()`, `get_legacy_database_path()`, `DATABASE_PATH` removed)
+- **config/config.py**: Configuration management using environment variables from `.env` file (`get_web_settings()` for the web library, v3.0.0; v3.2.0: `DATA_DIR_NAME = '.tad'`, `get_downloads_dir()`, `get_data_dir()`, `get_database_path()`, `get_legacy_database_path()` (v3.3.0: only used to migrate old databases), `DATABASE_PATH` removed)
 
 ### Web Library Components (v3.0.0)
 - **library/**: aiohttp backend of the web video library: `media.py` (ffprobe/ffmpeg, sidecar metadata), `store.py` (`Library`), `auth.py` (password/session), `server.py` (`LibraryServer`)
@@ -122,13 +122,13 @@ setup_build_env.bat
 1. User forwards a message or media group to the bot
 2. Bot detects if message has `media_group_id` and collects all grouped messages
 3. Bot extracts original chat and message information from forward metadata
-4. Database checks for existing downloads to prevent duplicates (v0.4.0)
+4. `DownloadRecords` checks for existing downloads to prevent duplicates (v0.4.0, v3.3.0)
 5. Uses Telethon client to access the original message, media groups, and all replies
 6. `FolderNavigator` presents inline keyboard UI with subfolder buttons, up/confirm/create actions, and previous-path history (v2.1.0)
 7. User navigates folders by tapping inline buttons; types a name only when creating a new folder (v2.1.0)
 8. (v2.6.1) Every request goes through the per-item queue (`submit_flow`): the folder selector (step 6) appears only when it is the item's turn, so nothing downloads into a pre-chosen folder
 9. Downloads all media files concurrently using `MediaDownloader` to user-selected folder (v0.5.0)
-10. Database records download metadata and file information (v0.4.0)
+10. `DownloadRecords` records download metadata beside the file (v0.4.0, v3.3.0)
 11. `DownloadMonitor` provides real-time progress updates with speed/disk usage stats
 12. Provides completion summary with performance metrics and storage location
 
@@ -145,7 +145,7 @@ Main orchestration class that coordinates all bot operations:
 - `get_message_and_replies()`: Retrieves original message and replies using Telethon with enhanced error handling
 - `submit_flow()` / `enqueue_flow()` / `_queue_worker()`: Serial request queue of `FlowItem`s (v2.6.1); bot keeps accepting messages during downloads, waiting items show their queue position, each item gets its own folder selector (shown only after the previous download finishes, 30-minute timeout, `❌ 取消` skips); queue is in-memory
 - `_handle_tme_link()` / `parse_tme_link()`: owner-only `t.me/<user>/<id>` and `t.me/c/<id>/<id>` links (`?single` = that message only) are read via the Telethon user session (`get_message_and_replies`, album via `_collect_media_from_original`) and queued with `submit_flow`; works for chats with "restrict saving content" (v2.7.7)
-- `_startup_scan()` / `_present_scan_unit()`: On start, checks the user's last `STARTUP_SCAN_COUNT` own messages to the bot (Telethon) against the DB and queues undownloaded channel posts/albums and X/YouTube links (X account links not scanned) (v2.6.1)
+- `_startup_scan()` / `_present_scan_unit()`: On start, checks the user's last `STARTUP_SCAN_COUNT` own messages to the bot (Telethon) against the download records and queues undownloaded channel posts/albums and X/YouTube links (X account links not scanned) (v2.6.1)
 - `handle_rescan_command()` / `_scan_recent(limit, manual)`: owner-only `/rescan [count]` runs the startup scan again (registered in the command menu); `_scan_items` maps each scan unit key to its queued `FlowItem` so units still waiting are not queued twice; always reports the result in the chat (v2.7.6)
 - `run()`: Main bot startup and event loop management
 
@@ -154,6 +154,7 @@ Handles all download operations with concurrent processing:
 - `download_multiple_messages_concurrent()`: Manages concurrent download tasks
 - `download_media_with_retry()`: Downloads with retry mechanism, exponential backoff, and progress tracking
 - `download_media_from_message()`: Downloads media files with smart naming and type detection
+- `file_name_for(message)` (static, v3.3.1): the naming rule moved out of `download_media_from_message()` (behaviour unchanged), returns `(file name, file type, original name, mime)`; used to match a source message to a broken file
 - `get_media_size()`: Calculates file sizes before download for progress tracking
 - `save_progress()` / `load_progress()`: Progress persistence for resume capability
 
@@ -183,26 +184,29 @@ Inline-keyboard browser of the downloads folder for `/files` (v2.7.0):
 - Listing (v2.7.1, modeled on `FolderNavigator._generate_folder_ui`): no paging; all sub folders in a 2-per-row grid (names cut to 18 chars), text shows folder/video/photo/file counts + total size; empty folder offers `🗑 刪除此資料夾`; the newest `MAX_FILE_BUTTONS` (30) files of the level are listed below the folders as `fv_f:<index>` buttons (index into `state.entries` = folders + shown files) opening the detail view (also via `/files <file path>`); hidden files and `.part` hidden; all paths confined to the downloads folder (`..`, absolute paths, outside symlinks rejected)
 - Folder video preview (v2.7.1): `fv_pv` (`🎞 預覽資料夾影片 (n)`, this level, shown only if it has videos) and `fv_pva` (`🎞 預覽資料夾內所有影片 (n)`, recursive, shown only if sub folders add videos); `list_videos()` collects videos, `build_batch_preview()` returns a `PreviewBatch` of up to 10, each with ONE screenshot (`build_frame_preview()`: 15s, middle frame for videos under ~16s), caption = path relative to the browsed folder + timestamp + source link; `fv_pn` (`▶️ 下一頁（剩餘 n 部）`) sends the next 10 as a new album, previous albums kept, only the control message replaced, shows `已預覽 x/y 部影片`, unreadable videos skipped and counted
 - Folder photo loading (v2.7.3): `fv_ph` (`🖼 載入照片 (n)`, this level) and `fv_pha` (`🖼 載入所有照片 (n)`, recursive) reuse the `fv_pn` lazy paging; `list_photos()`/`list_media()` collect files, `build_batch_preview()` returns a thumbnail per photo (`build_image_preview()`), `ViewState.preview_kind` is `video` or `photo`
-- Detail view shows size, mtime, location, video duration/resolution, download time and the source link (`source_link()`: `t.me/c/<channel>/<message>`, original YouTube/X/Pornhub URL, `x.com/i/status/<id>` for X profile downloads, "未知" if unknown); record from `DatabaseManager.find_download(file_path)` (match by path, fallback file name + size)
+- Detail view shows size, mtime, location, video duration/resolution, download time and the source link (`source_link()`: `t.me/c/<channel>/<message>`, original YouTube/X/Pornhub URL, `x.com/i/status/<id>` for X profile downloads, "未知" if unknown); record from `DownloadRecords().find_download(file_path)` (match by path, fallback file name + size)
 - `build_preview(path)` (single-file `🖼 預覽`, unchanged in v2.7.1): image -> 1 photo; video -> 3 OpenCV frames (15s, middle, 15s before end; <45s uses 10%/50%/90%), run in an executor
 - Load video (v2.7.5): detail view `fv_load` -> `ViewResult.load_path` -> `TelegramMediaBot._load_video()` uploads via `upload_client` (second Telethon session `bot_upload_session` logged in with the bot token, started in `run()`; resolves the chat from updates it received) with `DocumentAttributeVideo` + thumbnail; `src/video_loader.py`: `needs_compression()` (>500 MB or >4000 kbps), `compress_video()` (ffmpeg libx265, 720p, 2000 kbps, aac 128k, progress shown in the status message), result stored as hidden `.<name>.720p_h265.mp4` (`compressed_path()`, re-used via `existing_compressed()`); needs ffmpeg in PATH or `FFMPEG_PATH` (not bundled)
-- Delete with confirmation: files and empty folders only; the DB record is kept so the startup scan does not re-offer the file
+- Delete with confirmation: files and empty folders only; deleting calls `DownloadRecords().forget_file()` (`_forget`), which moves the record to `deleted.json` so the startup scan does not re-offer the file and the 下載紀錄 page lists it (v3.3.0)
 
 #### `XProfileDownloader` (web/x_profile_downloader.py)
 Downloads media and/or screenshots of a whole X account (v2.5.0):
 - `start_flow(username, user_id, processing_msg)`: Scans the account with gallery-dl (in-process `gallery_dl.job.DataJob`, Firefox cookies; ~3,200 post limit; retweets excluded), replies with post/video/photo counts and the mode buttons (`xp_media`, `xp_both`, `xp_shot`)
 - `on_mode_chosen(mode, user_id, message, folder_navigator)`: Stores the mode, shows the folder keyboard (`url_type = 'x_profile'`)
-- `download(user_id, dest_dir, processing_msg)`: Output to `<folder>/x_<username>/` (screenshots in `screenshots/`); media concurrent (5), named `<tweetid>_<n>.<ext>`, deduped by file existence and DB id `xprofile_<tweetid>_<n>`; screenshots via Playwright Chromium (3 concurrent); posts without media are never downloaded/screenshotted
+- `download(user_id, dest_dir, processing_msg)`: Output to `<folder>/x_<username>/` (screenshots in `screenshots/`); media concurrent (5), named `<tweetid>_<n>.<ext>`, deduped by file existence and record id `xprofile_<tweetid>_<n>`; screenshots via Playwright Chromium (3 concurrent); posts without media are never downloaded/screenshotted
 - Notes: gallery-dl must run in-process (frozen exe's `sys.executable` is the app, so `python -m gallery_dl` fails). Requires being logged in to X in Firefox. Screenshots need Chromium: use the GUI Install button (or `playwright install chromium` from source); not bundled by PyInstaller, media download works without it
 
 #### `LibraryServer` / `Library` (library/, v3.0.0)
 Web video library (watch and manage downloaded videos in a browser; Telegram/system settings stay in the Windows app):
-- `Library` (`store.py`): `scan()` walks the downloads folder (files changed in the last `SETTLE_SECONDS`=90 are deferred as still being written, `deferred` makes the next rescan come after 60 s; v3.0.2) (video id = base64url of the relative path, `encode_id`/`decode_id`, `resolve()` confines to the folder); 2 background workers (`queue_refresh()`/`_refresh()`) fill missing info and screenshots; source auto-filled from the bot DB (`_lookup_source` via `find_download`/`source_link`); `list()`, `detail()`, `update()`, `delete()`, `tags()`, `processing()`; folder / file management (v3.0.1): `folders()`, `create_folder()`, `rename_folder()`, `delete_folder()` (empty only), `rename_video()` (keeps the extension), `move(video_ids, folders, dest)`; `_move_video()` carries the hidden sidecars (`_sidecars()`: meta, shots, `.720p_h265` copy), `check_name()` validates names, `_check_not_busy()` refuses videos still being processed, errors are `LibraryError(message, status)`
+- `Library` (`store.py`): `scan()` walks the downloads folder (files changed in the last `SETTLE_SECONDS`=90 are deferred as still being written, `deferred` makes the next rescan come after 60 s; v3.0.2) (video id = base64url of the relative path, `encode_id`/`decode_id`, `resolve()` confines to the folder); 2 background workers (`queue_refresh()`/`_refresh()`) fill missing info and screenshots; source auto-filled from the download record (`_lookup_source` via `find_download`/`source_link`); `list()`, `detail()`, `update()`, `delete()`, `tags()`, `processing()`; folder / file management (v3.0.1): `folders()`, `create_folder()`, `rename_folder()`, `delete_folder()` (empty only), `rename_video()` (keeps the extension), `move(video_ids, folders, dest)`; `_move_video()` carries the hidden sidecars (`_sidecars()`: meta, shots, `.720p_h265` copy), `check_name()` validates names, `_check_not_busy()` refuses videos still being processed, errors are `LibraryError(message, status)`
 - `library/media.py`: `probe_info()` (ffprobe: width/height, bit rate, video bit rate, bit depth, codec/profile, fps, audio codec/channels/sample rate, duration, size), `make_screenshots()` (9 via ffmpeg), `direct_playable()`/`mime_codecs()`, `load_meta()`/`save_meta()`, `remove_sidecars()`; sidecars are hidden files next to the video: `.<file>.meta.json` (title, actors[], series, source, cached info) and `.<file>.shots/01.jpg..09.jpg` (the chat `/files` viewer skips dot files); web delete also removes the hidden `.720p_h265` copy
 - `library/auth.py`: `hash_password()`/`verify_password()` (PBKDF2, `WEB_PASSWORD_HASH`), `Sessions` (HMAC-signed cookie with `WEB_SECRET`; changing the password invalidates all sessions; 5 wrong passwords -> 15 min lockout per client)
 - `LibraryServer` (`server.py`, aiohttp; `start_in_thread()`/`stop_thread()` used by the GUI and CLI). v3.1.1: every route below is under `PREFIX` = `/library` (frontend at `/library/`, `/` is a blank page, `/library` redirects; session cookie path `/library`, `_session_tokens()` accepts any cookie value so a stale `/` cookie from older versions doesn't block login; `store.MEDIA_URL`; frontend `api.js` `BASE`/`API`/`MEDIA`, vite `base: '/library/'`, `BrowserRouter basename`): `/api/login|logout|session|status|videos|videos/{id}` (GET/PATCH/DELETE)`|videos/{id}/screenshots|tags|rescan`, `/api/folders` (GET/POST), `/api/folders/rename|delete`, `/api/videos/{id}/rename`, `/api/move` (v3.0.1); `/media/{id}/file` (HTTP range), `/media/{id}/stream?t=&h=480|720|1080` (live ffmpeg transcode to fragmented H.264/AAC MP4; no range support so Safari/iOS cannot play it), `/media/{id}/shots/NN.jpg`; serves `library/static` with SPA fallback; rescans every 5 min; security headers; paths confined to the downloads folder
 - Frontend (`frontend/`): pages Login, Library (left `FolderTree` with drag & drop move, right-click `ContextMenu` / `PromptDialog` from `components/Dialogs.jsx`, card/list view switch stored in localStorage `tad.view`, list shows bit rate + 畫質 sort (short side, then bit rate, v3.0.2), search, filter 主演/系列, sort, filters in URL; v3.0.1), VideoPage (3x3 screenshots, edit title/actors/series/source, Video Info, download, regenerate screenshots, delete); `components/Player.jsx` plays the original when `direct` and `canPlayType` allow, otherwise live transcode with custom controls (seek restarts the stream, ±10s, volume, 480/720/1080p, fullscreen, Space/←/→/F)
 - Versions (v3.1.0, `library/similarity.py`): `ssim()` reproduces skimage's default SSIM with OpenCV, `similarity()` = mean over screenshots 1/5/9 (`SIG_SHOTS`), `load_signature()`/`build_signature()` cache the 320x180 grayscale frames as `sig.npy` in the shots folder; `Library` keeps `_sigs` in memory, `threshold` (default `DEFAULT_THRESHOLD`=70), `check_all()` (full check after the first scan, sets `matching_ready`), `_match_new()` (after each refresh, calls `on_grouped(text)`), `_join()` (shared title / actors / series, merged tags), `ungroup()` (adds both `uid`s to `not_same`), `_versions()` in `detail()`; sidecar meta has `uid`, `group`, `not_same`; frontend collapses a group to its best version (`qualityKey`) and VideoPage switches 線路 with `state.resume`
+- Photos (v3.3.0): `library/media.py` has `IMAGE_EXTS` (.jpg .jpeg .png .gif .webp .bmp), `is_image`/`is_media`/`kind_of`, `read_sidecar`, `set_download`, `process_image()` (OpenCV `np.fromfile` + `imdecode`: width/height/format/bit_depth/channels + thumbnail `.shots/01.jpg` max 640x1280; GIF first frame via ffprobe/ffmpeg) and `save_meta()` keeps the on-disk `download` record (records own it; `_meta_lock`). `Library` scans videos and photos (entry `kind`; photos get info + thumbnail, no similarity grouping); summaries carry `kind`; a photo's `detail()` has `neighbors` {prev, next, index, total} (photos of the same folder by name); `list(kind)`; `folders()` returns `videos` and `photos` counts; `_sync_meta()` reloads a sidecar changed on disk (bot record, another PC), `_save()`; `delete()` calls `DownloadRecords().forget_file()`, moves call `file_moved`/`folder_moved`
+- History (v3.3.0, `server.py`): `/library/api/videos?kind=video|photo`; `GET /library/api/history` (`q`, `status=exists|deleted`, `kind=video|photo|file`, `offset`, `limit`; items: key, file, rel, folder, kind, size, date, deleted_date, deleted, source, inside, `id` (library id when shown in the library), `redownload` flag); `POST /library/api/history/redownload` {key} -> 202 / 404 / 409 (file still exists) / 503 (bot not running); `LibraryServer(on_redownload=...)`, passed by GUI (`ui.py` `_redownload`) and CLI (`main.py`). Bot side (`bot.py`): `request_redownload_threadsafe(loop, record)` returns an error text or None; `_submit_redownload` sends a status message to the owner and queues with `submit_flow`; `_redownload_now` downloads into the file's original folder: `xprofile_` ids via `x_profile_downloader._fetch` + `record_download`, URL records via `url_parser.download_confirmed(selected_path=folder)`, Telegram records via `PeerChannel(chat_id)` + message id and `_start_download_with_selected_folder`. `web/youtube_downloader.py`, `x_downloader.py`, `p_downloader.py`: the fingerprint duplicate check only counts a record whose file still exists, so a deleted video can be downloaded again. Broken-file re-download (v3.3.1): `GET /library/api/videos/{id}` adds `redownload: {possible, note, bot}` for items with an error; `POST /library/api/videos/{id}/redownload` -> 202 / 404 (no source: reason text) / 503 (bot not running); `on_redownload(record, replace=None)` takes the broken file path as `replace` (`ui.py` `_redownload`, `main.py` lambda). `bot.py`: `request_redownload_threadsafe(loop, record, replace=None)`; `_find_source_message()` uses the recorded chat or, for a guess, tries each candidate channel and accepts a message only if `MediaDownloader.file_name_for(message)` equals the file name; `_discard_broken(path)` = `forget_file` then delete. Telegram: the broken file is deleted only after the source message is found (otherwise kept and the user told); YouTube/X/Pornhub: the broken copy is removed before downloading (it would count as a duplicate), the record stays in 下載紀錄 for a retry; X profile items are fetched over the file (`_fetch` writes `.part` then replaces)
+- Frontend (v3.3.0): `api.js` `KINDS`, `storedKind`/`rememberKind` (localStorage `tad.kind`), `dimensions()`, `api.videos(kind)`, `api.history`, `api.redownload`; Library page has the 影片 / 圖片 / 全部 toggle on the filter row (`?kind=`), a 📜 下載紀錄 button, per-kind folder counts (`FolderTree` `rootLabel`); `VideoCard`/`VideoRow` photo variant (🖼, W×H instead of duration); VideoPage photo mode (large image, ‹ › and ←/→ for neighbors, Photo Info: 長寬/格式/Bit depth/大小/位置, 重新產生縮圖, 刪除圖片 continues with the next photo, `state.backPath`); `pages/History.jsx` at `/history` (status filter with counts, type filter, search, 100 per page with 載入更多; existing rows open the item page, deleted rows have ⬇ 重新下載 -> 已排入佇列); VideoPage (v3.3.1): an item with an error shows a red box with the error, `video.redownload.note` and a ⬇ 重新下載 button (disabled without a source or when the bot isn't running here), `api.redownloadVideo(id)`
 - GUI: "Web Library" tab in `src/ui.py` (`setup_web_tab`, `start_web`, `stop_web`, `save_web_settings_clicked`, `auto_start_web`); `main.py --cli` also starts the library when `WEB_ENABLED=1`
 
 #### `AuthHelper` (src/auth_helper.py)
@@ -221,9 +225,9 @@ The bot requires these environment variables in `.env`:
 - `API_HASH`: Telegram API Hash from my.telegram.org  
 - `PHONE_NUMBER`: Phone number for Telegram client authentication
 - `BOT_TOKEN`: Bot token from @BotFather
-- `STARTUP_SCAN_COUNT` (optional, v2.6.1): number of latest messages sent to the bot that are scanned at startup (default 30, 0 = off); read via `config.get_startup_scan_count()`, editable in GUI Configuration tab; `DatabaseManager.is_url_downloaded()` checks links ignoring query params
-- `DOWNLOADS_PATH` (optional, v3.2.0): downloads folder, read live via `config.get_downloads_dir()` (default `<app dir>/downloads`); data folder `<downloads>/.tad/` (hidden on Windows) holds `downloads.db` and `history.json`, so the folder can be opened from another PC (paths relative, sqlite default journal, no WAL). Per device: `.env`, Telethon sessions, logs; run the bot on one PC at a time, the web library may run on several
-- Database (v2.7.0): `DatabaseManager.find_download(file_path)` returns the download record of a file on disk (path match, fallback file name + size so moved files are found); used by the file viewer for source links
+- `STARTUP_SCAN_COUNT` (optional, v2.6.1): number of latest messages sent to the bot that are scanned at startup (default 30, 0 = off); read via `config.get_startup_scan_count()`, editable in GUI Configuration tab; `DownloadRecords.is_url_downloaded()` checks links ignoring query params
+- `DOWNLOADS_PATH` (optional, v3.2.0): downloads folder, read live via `config.get_downloads_dir()` (default `<app dir>/downloads`); data folder `<downloads>/.tad/` (hidden on Windows) holds `deleted.json` (deleted downloads, v3.3.0) and `history.json` (no `downloads.db` since v3.3.0; records live beside the files), so the folder can be opened from another PC (paths relative). Per device: `.env`, Telethon sessions, logs; run the bot on one PC at a time, the web library may run on several
+- Records (v2.7.0, `DownloadRecords` since v3.3.0): `find_download(file_path)` returns the download record of a file on disk (path match, fallback file name + size so moved files are found); used by the file viewer for source links
 - Security (v2.7.0): the `/files` viewer is owner-only (`TelegramMediaBot.owner_id` = Telethon session account) and confined to the downloads folder
 - Web library (v3.0.0, all optional, read via `config.get_web_settings()`): `WEB_ENABLED` (1 = start with the bot, default 0), `WEB_PORT` (default 8765), `WEB_HOST` (`0.0.0.0` any location / `127.0.0.1` this PC only), `WEB_PASSWORD_HASH` (PBKDF2, set from the GUI Web Library tab, never plain text), `WEB_SECRET` (cookie signing key), `SIMILARITY_THRESHOLD` (percent, default 70, GUI "Same-video similarity", v3.1.0); needs ffmpeg/ffprobe in PATH or `FFMPEG_PATH`, `aiohttp`, and a built `library/static` (Node.js 18+)
 
@@ -240,7 +244,7 @@ telegram_auto_download/
 │   ├── bot.py                   # Main bot logic with enhanced authentication (580+ lines)
 │   ├── downloader.py           # Download operations with concurrency (234 lines)
 │   ├── monitor.py              # Real-time monitoring and progress (134 lines)
-│   ├── database.py             # SQLite database management and operations
+│   ├── records.py              # DownloadRecords: per-file download records in sidecars + .tad/deleted.json (v3.3.0)
 │   ├── folder_navigator.py     # Interactive folder navigation system (260 lines)
 │   ├── auth_helper.py          # GUI/console authentication helper (197 lines, v1.0.0)
 │   ├── file_viewer.py          # /files chat file viewer (owner only, v2.7.0; folder video preview v2.7.1)
@@ -264,7 +268,7 @@ telegram_auto_download/
 ├── frontend/                   # Web library UI (React 18 + Vite 6 + Tailwind CSS 4, v3.0.0)
 │   ├── package.json
 │   ├── vite.config.js
-│   └── src/                    # App.jsx, api.js, pages/ (Login, Library, VideoPage), components/ (Player, TagInput, VideoCard)
+│   └── src/                    # App.jsx, api.js, pages/ (Login, Library, VideoPage, History), components/ (Player, TagInput, VideoCard)
 ├── config/
 │   └── config.py               # Configuration management
 ├── main.py                     # Unified application entry point (CLI/GUI)
@@ -276,7 +280,7 @@ telegram_auto_download/
 ├── create_icon.py              # Application icon generator (v1.0.0)
 ├── ChangeLog.md                # Version history and release notes
 ├── downloads/                  # User-organized backup directory with folder structure (DOWNLOADS_PATH)
-│   └── .tad/                   # Data folder (v3.2.0): downloads.db (download history), history.json (folder path history)
+│   └── .tad/                   # Data folder (v3.2.0): deleted.json (deleted download records, v3.3.0), history.json (folder path history)
 ├── logs/                       # Log files directory (auto-created)
 └── bot_session.session         # Telethon session file (auto-generated)
 ```
@@ -319,11 +323,11 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - Bot supports forwarded messages from channels and group chats only (not private chats)
 - **Interactive Folder Navigation**: Users can choose download destination with real-time folder browsing (v0.5.0)
 - **Media Group Detection**: Automatically detects and processes grouped media (albums) as single units
-- **Database Integration**: SQLite database tracks all downloads and prevents duplicates (v0.4.0)
+- **Download Records**: sidecar-based records track all downloads and prevent duplicates (v0.4.0 SQLite, v3.3.0 records beside files)
 - Concurrent processing: Downloads up to 5 media files simultaneously for faster performance
 - Files are permanently stored in user-organized directories with custom folder structures (v0.5.0)
 - **Smart Directory Structure**: User-controlled organization with live folder statistics (v0.5.0)
-- **Duplicate Prevention**: Database-driven checks prevent re-downloading existing files (v0.4.0)
+- **Duplicate Prevention**: Record-driven checks prevent re-downloading existing files (v0.4.0)
 - Smart file naming includes message ID and timestamp
 
 ### User Experience Features
@@ -348,7 +352,7 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - **Modular Design**: Refactored from monolithic 596-line file into 6 specialized modules
 - **Inline Keyboard Navigation Architecture**: Button-driven folder navigation with index-based callback routing and persistent path history (v2.1.0)
 - **Media Group Architecture**: Intelligent collection and processing of grouped media
-- **Database Architecture**: SQLite integration for persistent download tracking and metadata
+- **Records Architecture**: per-file sidecar records (`DownloadRecords`) for persistent download tracking and metadata (v3.3.0, was SQLite)
 - **Asyncio-based Architecture**: Concurrent processing for maximum performance
 - **Semaphore Control**: Configurable download concurrency (`max_concurrent_downloads = 5`)
 - **Background Monitoring**: Separate thread for real-time statistics without blocking downloads
@@ -356,7 +360,7 @@ The bot handles all Telegram media types, including media groups (v0.3.1):
 - **Optimized Client**: Telethon client with connection pooling and retry logic
 - **Clean Separation**: Bot orchestration, download operations, monitoring, authentication, and folder navigation are decoupled
 - **Dual API Integration**: Smart handling of Bot API and Telethon API differences
-- **Database Integration**: Comprehensive download history and duplicate detection system
+- **Records Integration**: Comprehensive download history and duplicate detection system
 - **User State Management**: Per-user navigation state with session isolation
 - **Session Management**: Intelligent session validation and automatic cleanup
 - **Professional Deployment**: Complete build automation and installer generation (v1.0.0)

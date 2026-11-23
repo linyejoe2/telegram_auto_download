@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, baseName, parentOf, qualityKey } from '../api.js'
+import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, storedKind } from '../api.js'
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
 import { ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
@@ -68,6 +68,9 @@ export default function Library({ guard, onLogout }) {
   const series = params.get('series') || ''
   const folder = params.get('folder') || ''
   const sort = params.get('sort') || 'added'
+  const kind = KINDS[params.get('kind')] ? params.get('kind') : storedKind() // 影片 / 圖片 / 全部
+  const apiKind = kind === 'all' ? '' : kind
+  const K = KINDS[kind]
 
   function setParam(key, value) {
     const next = new URLSearchParams(params)
@@ -84,7 +87,7 @@ export default function Library({ guard, onLogout }) {
 
   async function load() {
     try {
-      const [v, t, f] = await Promise.all([api.videos(), api.tags(), api.folders()])
+      const [v, t, f] = await Promise.all([api.videos(apiKind), api.tags(), api.folders()])
       setVideos(v.videos)
       setProcessing(v.processing)
       setTags(t)
@@ -96,7 +99,13 @@ export default function Library({ guard, onLogout }) {
 
   useEffect(() => {
     load()
-  }, [])
+  }, [apiKind])
+
+  function switchKind(k) {
+    rememberKind(k)
+    setVideos(null)
+    setParam('kind', k)
+  }
 
   // while screenshots / info are being generated, refresh so new covers appear
   useEffect(() => {
@@ -172,8 +181,8 @@ export default function Library({ guard, onLogout }) {
 
   function renameVideo(video) {
     setDialog({
-      title: '重新命名影片檔',
-      label: '副檔名不輸入會自動保留；影片資訊與截圖會一起改名',
+      title: video.kind === 'photo' ? '重新命名圖片檔' : '重新命名影片檔',
+      label: '副檔名不輸入會自動保留；資訊與截圖會一起改名',
       initial: video.file,
       confirmText: '重新命名',
       onSubmit: async (name) => {
@@ -192,8 +201,9 @@ export default function Library({ guard, onLogout }) {
   }
 
   async function deleteVideo(video) {
-    if (!window.confirm(`確定要刪除「${video.file}」嗎？\n影片檔與它的資訊、截圖都會刪除，無法復原。`)) return
-    await act(() => api.remove(video.id), '已刪除影片')
+    const what = video.kind === 'photo' ? '圖片' : '影片'
+    if (!window.confirm(`確定要刪除「${video.file}」嗎？\n${what}檔與它的資訊、截圖都會刪除，無法復原。\n（下載紀錄會保留，之後可在「下載紀錄」重新下載）`)) return
+    await act(() => api.remove(video.id), `已刪除${what}`)
   }
 
   async function dropItems(dest, items) {
@@ -217,7 +227,7 @@ export default function Library({ guard, onLogout }) {
       items.push(
         { label: '✏️ 重新命名', onClick: () => renameFolder(path) },
         '-',
-        { label: '🗑 刪除（僅空資料夾）', danger: true, disabled: hasChildren || (info?.videos || 0) > 0, onClick: () => deleteFolder(path) },
+        { label: '🗑 刪除（僅空資料夾）', danger: true, disabled: hasChildren || (info?.videos || 0) + (info?.photos || 0) > 0, onClick: () => deleteFolder(path) },
       )
     }
     setMenu({ x, y, items })
@@ -228,11 +238,11 @@ export default function Library({ guard, onLogout }) {
       x,
       y,
       items: [
-        { label: '▶ 開啟', onClick: () => navigate(`/v/${video.id}`, { state: { back: params.toString() } }) },
+        { label: video.kind === 'photo' ? '🖼 開啟' : '▶ 開啟', onClick: () => navigate(`/v/${video.id}`, { state: { back: params.toString() } }) },
         { label: '✏️ 重新命名', onClick: () => renameVideo(video) },
         { label: '📂 前往所在資料夾', onClick: () => setParam('folder', video.folder) },
         '-',
-        { label: '🗑 刪除影片', danger: true, onClick: () => deleteVideo(video) },
+        { label: video.kind === 'photo' ? '🗑 刪除圖片' : '🗑 刪除影片', danger: true, onClick: () => deleteVideo(video) },
       ],
     })
   }
@@ -263,9 +273,15 @@ export default function Library({ guard, onLogout }) {
   }, [videos, q, actor, series, folder, sort])
 
   const filtered = q || actor || series || folder
+  // folder counts of what is shown (影片 / 圖片 / both)
+  const counted = useMemo(
+    () => folders.map((f) => ({ ...f, videos: kind === 'photo' ? f.photos || 0 : kind === 'video' ? f.videos : f.videos + (f.photos || 0) })),
+    [folders, kind],
+  )
   const tree = (
     <FolderTree
-      folders={folders}
+      folders={counted}
+      rootLabel={`全部${K.label === '全部' ? '' : K.label}`}
       selected={folder}
       onSelect={(p) => {
         setParam('folder', p)
@@ -297,9 +313,9 @@ export default function Library({ guard, onLogout }) {
             <button onClick={() => setSidebar(true)} className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm lg:hidden" aria-label="資料夾">
               📁
             </button>
-            <h1 className="truncate text-lg font-semibold">{folder ? baseName(folder) : '影片庫'}</h1>
+            <h1 className="truncate text-lg font-semibold">{folder ? baseName(folder) : K.title}</h1>
             <span className="shrink-0 text-sm text-neutral-400">
-              {videos ? `${shown.length}${filtered ? ` / ${videos.length}` : ''} 部` : ''}
+              {videos ? `${shown.length}${filtered ? ` / ${videos.length}` : ''} ${K.unit}` : ''}
             </span>
             {processing > 0 && (
               <span className="hidden rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300 sm:inline">產生資訊/截圖中：{processing}</span>
@@ -330,6 +346,25 @@ export default function Library({ guard, onLogout }) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <div className="flex overflow-hidden rounded-lg ring-1 ring-white/10" role="group" aria-label="顯示類型">
+              {['video', 'photo', 'all'].map((k) => (
+                <button
+                  key={k}
+                  onClick={() => switchKind(k)}
+                  aria-pressed={kind === k}
+                  className={`px-3 py-1.5 text-sm ${kind === k ? 'bg-accent/80 text-white' : 'bg-neutral-800 hover:bg-neutral-700'}`}
+                >
+                  {KINDS[k].label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => navigate('/history')}
+              className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
+              title="所有下載過的檔案，已刪除的可以重新下載"
+            >
+              📜 下載紀錄
+            </button>
             <input
               value={q}
               onChange={(e) => setParam('q', e.target.value)}
@@ -354,7 +389,7 @@ export default function Library({ guard, onLogout }) {
               ))}
             </Select>
             {filtered && (
-              <button onClick={() => setParams({}, { replace: true })} className="text-sm text-neutral-400 hover:text-white">
+              <button onClick={() => setParams(kind === storedKind() ? {} : { kind }, { replace: true })} className="text-sm text-neutral-400 hover:text-white">
                 清除篩選
               </button>
             )}
@@ -364,7 +399,9 @@ export default function Library({ guard, onLogout }) {
         {videos === null ? (
           <p className="text-neutral-400">載入中…</p>
         ) : shown.length === 0 ? (
-          <p className="py-16 text-center text-neutral-500">{videos.length ? '沒有符合的影片' : '下載資料夾中還沒有影片'}</p>
+          <p className="py-16 text-center text-neutral-500">
+            {videos.length ? `沒有符合的${kind === 'all' ? '項目' : K.label}` : `下載資料夾中還沒有${kind === 'all' ? '影片或圖片' : K.label}`}
+          </p>
         ) : view === 'grid' ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
             {shown.map((v) => (
@@ -385,7 +422,7 @@ export default function Library({ guard, onLogout }) {
               >
                 畫質 / bit rate{sort === 'quality' ? ' ↓' : ''}
               </button>
-              <span>片長</span>
+              <span>{kind === 'photo' ? '' : '片長'}</span>
               <span className="text-right">大小</span>
             </div>
             {shown.map((v) => (
