@@ -27,7 +27,7 @@ function remember(map, key, value) {
   while (map.size > CACHE_LIMIT) map.delete(map.keys().next().value)
 }
 
-const formOf = (v) => ({ _id: v.id, title: v.title, actors: v.actors, series: v.series, source: v.source })
+const formOf = (v) => ({ _id: v.id, title: v.title, actors: v.actors, series: v.series, source: v.source, description: v.description || '' })
 const SWIPE_MIN = 60 // px a finger must travel to switch photo
 
 export default function VideoPage({ guard }) {
@@ -240,6 +240,7 @@ export default function VideoPage({ guard }) {
     form.title !== video.title ||
     form.series !== video.series ||
     form.source !== video.source ||
+    form.description !== (video.description || '') ||
     form.actors.join('\n') !== video.actors.join('\n')
 
   return (
@@ -413,6 +414,16 @@ export default function VideoPage({ guard }) {
                 🔗 {video.source}
               </a>
             )}
+            <label className="block space-y-1">
+              <span className="text-xs text-neutral-400">描述（Telegram 下載時為原始訊息的文字）</span>
+              <textarea
+                className={`${field} min-h-24 resize-y leading-relaxed`}
+                rows={Math.min(12, Math.max(3, (form.description.match(/\n/g) || []).length + 2))}
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="沒有描述"
+              />
+            </label>
             <button disabled={!dirty || saving} className="w-full rounded-lg bg-accent py-1.5 text-sm font-medium hover:bg-accent-hover disabled:opacity-40">
               {saving ? '儲存中…' : saved ? '已儲存 ✓' : '儲存'}
             </button>

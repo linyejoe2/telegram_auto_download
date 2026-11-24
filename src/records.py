@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 DELETED_FILE = 'deleted.json'
 REFRESH_SECONDS = 120          # re-walk the folder at most this often (another PC may have added files)
 META_SUFFIX = '.meta.json'
-KEPT_LIBRARY_FIELDS = ('title', 'actors', 'series', 'source')   # restored when a deleted file comes back
+KEPT_LIBRARY_FIELDS = ('title', 'actors', 'series', 'source', 'description')   # restored when a deleted file comes back
 
 
 def _now() -> str:
@@ -431,7 +431,11 @@ class DownloadRecords:
 
     def record_download(self, file_unique_id: str, file_id: str, message_id: int, chat_id: int,
                         file_name: str, file_path: str, original_file_name: str = None, file_size: int = None,
-                        file_type: str = None, mime_type: str = None, message_date=None) -> bool:
+                        file_type: str = None, mime_type: str = None, message_date=None,
+                        description: str = None) -> bool:
+        """Write the download record into the file's sidecar. `description` (the Telegram message text)
+        fills the library's 描述 unless one is already there (typed in the web library, or kept from
+        before a deletion)."""
         self._ensure()
         try:
             record = self._make_record(file_unique_id, file_id, message_id, chat_id, file_name,
@@ -445,6 +449,8 @@ class DownloadRecords:
                             if _is_url(file_id) and _url_key(r.get('file_id')) == _url_key(file_id)]
             restore = {k: previous['library'][k] for k in KEPT_LIBRARY_FIELDS
                        if previous and k in (previous.get('library') or {})}
+            if description and description.strip() and not restore.get('description'):
+                restore['description'] = description.strip()[:5000]
             media.set_download(path, record, restore)
             with self._lock:
                 self._live[uid] = path

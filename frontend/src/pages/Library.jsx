@@ -339,7 +339,7 @@ export default function Library({ guard, onLogout }) {
       .filter(
         (v) =>
           !needle ||
-          [v.title, v.file, v.folder, v.series, ...v.actors].some((s) => (s || '').toLowerCase().includes(needle)),
+          [v.title, v.file, v.folder, v.series, v.description, ...v.actors].some((s) => (s || '').toLowerCase().includes(needle)),
       )
     // versions of the same video show once: the best quality one that passes the filters
     const groupSize = {}
@@ -586,7 +586,7 @@ export default function Library({ guard, onLogout }) {
             <input
               value={q}
               onChange={(e) => setParam('q', e.target.value)}
-              placeholder="搜尋標題、主演、系列、資料夾…"
+              placeholder="搜尋標題、主演、系列、描述、資料夾…"
               className="min-w-56 flex-1 rounded-lg bg-neutral-800 px-3 py-1.5 text-sm outline-none ring-1 ring-white/10 focus:ring-accent"
             />
             <Select label="主演" value={actor} onChange={(v) => setParam('actor', v)}>

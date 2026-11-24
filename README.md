@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.3.5
+# Telegram Auto Download Bot v3.4.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, download-record tracking, and real-time progress.
 
@@ -28,6 +28,9 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 - **🐦 X Account Download**  
   Send `https://x.com/<user>` — the bot scans the account, reports post/video/photo counts, then downloads all media and/or screenshots of posts.
 
+- **📚 Chat Download (v3.4.0)**  
+  Send `/chats` to pick a group or channel you joined and download all its photos and videos, skipping what you already have; interrupted downloads resume after a restart.
+
 - **🧾 Request Queue**  
   Keep sending posts and links while a download runs — items queue up and each asks for its own folder in turn.
 
@@ -46,7 +49,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.3.5.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.4.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -169,6 +172,15 @@ After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<u
 
 Send a Telegram message link (`https://t.me/<channel>/<id>` or `https://t.me/c/<id>/<id>`, owner only) and the bot reads it with the logged-in account, so channels that block forwarding ("restrict saving content") can still be backed up, as long as that account can see the message. `?single` downloads only that message; otherwise the whole album and media replies are included. Then choose the folder as usual.
 
+## 📚 Chat Download (/chats)
+
+Send `/chats` (owner only; also in the Telegram command menu) to list the groups and channels the logged-in account has joined, most recent first, 10 per page (👥 group / 📢 channel, `◀` `▶` to page). `/chats <keyword>` filters by name. Tap one and the bot scans its whole history with Telegram's photo/video filter (progress shown, `✖ 停止掃描` to cancel), then shows a summary (total, photos, videos, already downloaded, and the count and size to download) above the usual folder selector. The item waits its turn in the request queue like any other.
+
+- **Skips what you have:** items already downloaded, including deleted ones, are skipped at scan time, before downloading, so running `/chats` on the same group again only fetches what is missing.
+- **Download:** files go straight into the chosen folder, 5 at a time, with progress every 5 seconds and a `⏹ 停止下載` button (the half-written file is removed). Only photos and videos (Telegram's filter) are included, not images sent as files.
+- **Resume:** a started download is saved in `<DOWNLOADS_PATH>/.tad/chat_jobs.json`; if the bot stops or the PC restarts, the next start queues it again ("⏯ 繼續上次未完成的下載"), rescans and continues, skipping what is already there. Stopping or finishing removes the job.
+- **Description (v3.4.0):** every Telegram download (forward, album, t.me link, startup scan / `/rescan`, `/chats`, re-download) stores the original message text as `description` in the file's hidden `.<file>.meta.json`: the message's own text, else the album caption, else the root post's text for replies. Files downloaded before v3.4.0 have none.
+
 ## 🧾 Request Queue & Startup Scan
 
 The bot accepts forwarded posts, albums, X/YouTube links and X account links even while a download is running. Items wait in a serial queue (shown with their queue position); each gets its own folder selector, which appears only after the previous download finishes. Tap `❌ 取消` on a selector (or the X-account mode buttons) to skip an item; an unanswered selector times out after 30 minutes. The queue is kept in memory and is dropped when the bot stops.
@@ -197,9 +209,9 @@ A browser app (v3.0.0) for watching and managing the videos in your downloads fo
 - **Versions (v3.1.0):** videos whose lengths differ by at most 3 s are compared on their first, middle and last screenshots (grayscale SSIM); if the mean similarity reaches the threshold (default 70 %, set under **Same-video similarity** in the Web Library tab) they are grouped as versions of one video. The library shows a group once (best quality, "N 個版本" badge); the video page has a 版本 box to switch 線路 (playback continues at the same time) and 「從群組移出」 to split a wrong match (never grouped again). 標題 / 主演 / 系列 are shared by the group. The whole library is checked when the web library starts; a new download that matches is grouped automatically and the bot sends a Telegram notice.
 - **Folder tree (v3.0.1):** the left side lists every folder with video counts; click to browse, `＋ 新增` adds a folder, drag a video or folder onto a folder to move it, right-click (or `⋯`) a folder to rename / add a sub folder / delete it (empty only) and right-click a video to open, rename, go to its folder or delete. Moved and renamed videos keep their info and screenshots.
 - **Library page:** card or list view (▦ / ☰, remembered per browser) of videos (cover = first screenshot, resolution and duration badges), search, filter by 主演 / 系列, sort by 最新加入 / 標題 / 片長 / 檔案大小 / 畫質 (resolution, then bit rate; the list view shows bit rate under the resolution, v3.0.2) (filters are kept in the URL), rescan, logout, and a count of videos still being processed.
-- **Video page:** cover with play button and a 3x3 screenshot grid (click a screenshot to play from there); edit 標題 / 主演 (multi-select tags) / 系列 / 來源 (auto-filled from the download record); Video Info (size, bit rate, bit depth, codec, fps, audio, duration, playback mode, location); download the original, regenerate screenshots, delete (with confirmation).
+- **Video page:** cover with play button and a 3x3 screenshot grid (click a screenshot to play from there); edit 標題 / 主演 (multi-select tags) / 系列 / 來源 (auto-filled from the download record) / 描述 (v3.4.0: the original Telegram message text, editable, kept per file and not shared by versions; the library search matches it too); Video Info (size, bit rate, bit depth, codec, fps, audio, duration, playback mode, location); download the original, regenerate screenshots, delete (with confirmation).
 - **Playback:** the original file is played when the browser supports it; otherwise (or if it fails) the server transcodes live with ffmpeg to H.264/AAC with seek, ±10s, volume, 480/720/1080p, fullscreen and keys Space / ←/→ / F. Safari/iOS cannot play the live transcode.
-- **Where data is stored:** next to each video as hidden files `.<file>.meta.json` (title, actors, series, source, cached info) and `.<file>.shots/01.jpg-09.jpg`; the chat `/files` viewer skips them. Deleting from the web also removes the video, these files and the hidden `.720p_h265` copy. The downloads folder is rescanned every 5 minutes.
+- **Where data is stored:** next to each video as hidden files `.<file>.meta.json` (title, actors, series, source, description, cached info) and `.<file>.shots/01.jpg-09.jpg`; the chat `/files` viewer skips them. Deleting from the web also removes the video, these files and the hidden `.720p_h265` copy. The downloads folder is rescanned every 5 minutes.
 - **Photos (v3.3.0):** the library also lists photos (.jpg .jpeg .png .gif .webp .bmp) with a thumbnail and Photo Info (size, format, bit depth, location); the 影片 / 圖片 / 全部 toggle on the filter row picks what is shown (remembered per browser, `?kind=` in the URL). The photo page has a large image, ‹ › (or ←/→) to the neighbors in the same folder, regenerate thumbnail, and delete, which continues with the next photo. Photos are not grouped as versions. (v3.3.3) On phones you swipe left or right to switch photos, and the neighbors are preloaded so the next photo opens at once.
 - **Download history (v3.3.0):** the 📜 下載紀錄 button opens a page listing every download, existing and deleted, with search and status / type filters. Deleting a file keeps its record (and 標題 / 主演 / 系列 / 來源), so the startup scan and `/rescan` do not offer it again; a deleted row has ⬇ 重新下載, which queues it into its original folder. Re-download needs the bot running on that PC.
 - **Re-download broken files (v3.3.1):** a video or photo that is incomplete or damaged shows a red box on its page with how its source will be found (its own record, a deleted record with the same file name, or the Telegram message id in the file name) and a ⬇ 重新下載 button; the broken copy is replaced once the source is found. Needs the bot running on that PC.

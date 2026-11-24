@@ -26,6 +26,7 @@ class NavigationState:
     nav_message: object = None      # 導航訊息對象（用於編輯）
     pending_url: str = None         # 待下載的 URL（非 Telegram 媒體）
     url_type: str = None            # URL 類型，例如 'youtube'
+    pending_job: object = None      # async job(folder, message) run after the folder is confirmed (/chats)
 
     def __post_init__(self):
         if self.pending_messages is None:

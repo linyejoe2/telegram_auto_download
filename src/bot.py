@@ -10,14 +10,15 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 from telethon import TelegramClient
-from telethon.errors import RPCError
+from telethon.errors import FloodWaitError, RPCError
 from telethon.tl.types import DocumentAttributeVideo, PeerChannel
-from telegram import Update, BotCommand, InputMediaPhoto
+from telegram import Update, BotCommand, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
 
 from .monitor import DownloadMonitor
-from .downloader import MediaDownloader
+from .downloader import MediaDownloader, describe
 from .folder_navigator import FolderNavigator
+from . import chat_scanner
 from .records import DownloadRecords
 from .file_viewer import FileViewer, build_preview, build_batch_preview, build_frame_preview, probe_video, fmt_size
 from .video_loader import (find_ffmpeg, needs_compression, existing_compressed, compress_video,
@@ -125,6 +126,11 @@ class TelegramMediaBot:
         self.upload_client = None        # Telethon client logged in as the bot: uploads up to 2 GB (Bot API: 50 MB)
         self._loading = set()            # videos currently being compressed / uploaded
 
+        # /chats: whole-chat downloads (src/chat_scanner.py)
+        self._chat_lists = {}            # user id -> {'chats': [...], 'query': str}
+        self._chat_scanning = {}         # user id -> {'stop': bool} while a scan runs
+        self._chat_run = None            # running download: {'chat_id', 'task', 'stopped'}
+
         # Telethon client with GUI-friendly settings
         self.client = TelegramClient(
             'bot_session',
@@ -165,6 +171,7 @@ class TelegramMediaBot:
         self.app = Application.builder().token(bot_token).build()
         self.app.add_handler(CommandHandler('files', self.handle_files_command))
         self.app.add_handler(CommandHandler('rescan', self.handle_rescan_command))
+        self.app.add_handler(CommandHandler('chats', self.handle_chats_command))
         self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
 
@@ -402,6 +409,10 @@ class TelegramMediaBot:
             await self._handle_file_viewer_callback(user_id, query)
             return
 
+        if data.startswith("ch_"):
+            await self._handle_chats_callback(user_id, query)
+            return
+
         if data in ("xp_media", "xp_both", "xp_shot"):
             from web.x_profile_downloader import XProfileDownloader
             await XProfileDownloader().on_mode_chosen(
@@ -561,6 +572,7 @@ class TelegramMediaBot:
             for r in replies:
                 if getattr(r, 'media', None):
                     messages_to_download.append(r)
+            describe(messages_to_download, root=original_message)   # message text -> file description
 
             if not messages_to_download:
                 await processing_msg.edit_text('ℹ️ 該媒體組及相關回覆中沒有找到任何媒體文件')
@@ -592,6 +604,7 @@ class TelegramMediaBot:
                 messages = await self._collect_media_from_original(peer, original) or (
                     [original] if getattr(original, 'media', None) else [])
                 messages += [r for r in replies if getattr(r, 'media', None) and r not in messages]
+            describe(messages, root=original)
 
             if not messages:
                 await processing_msg.edit_text('ℹ️ 這則訊息沒有可下載的媒體文件')
@@ -635,6 +648,7 @@ class TelegramMediaBot:
             for r in replies:
                 if getattr(r, 'media', None):
                     messages_to_download.append(r)
+            describe(messages_to_download, root=original_message)
 
             if not messages_to_download:
                 await processing_msg.edit_text('ℹ️ 該訊息及其回覆中沒有找到任何媒體文件')
@@ -981,6 +995,7 @@ class TelegramMediaBot:
         nav = self.folder_navigator
         state = nav.get_user_state(user_id)
         pending_url, url_type = state.pending_url, state.url_type
+        pending_job = state.pending_job
 
         display_path, _ = nav.confirm_selection(user_id)
         pending = list(nav.get_pending_messages(user_id))
@@ -991,7 +1006,10 @@ class TelegramMediaBot:
             scan = pop_pending_scan(user_id)
         nav.clear_user_state(user_id)
 
-        if pending:
+        if pending_job:
+            async def runner():
+                await pending_job(selected_folder, message)
+        elif pending:
             async def runner():
                 await self._start_download_with_selected_folder(selected_folder, message, pending)
         elif pending_url and url_type:
@@ -1066,6 +1084,7 @@ class TelegramMediaBot:
                 candidates = (await self._collect_media_from_original(chat_id, original)
                               if m.grouped_id else ([original] if original.media else []))
                 candidates += [r for r in replies if getattr(r, 'media', None)]
+                describe(candidates, root=original)
                 missing = [c for c in candidates
                            if (c.chat_id, c.id) not in claimed and not self._is_media_downloaded(c)]
                 if missing:
@@ -1170,6 +1189,275 @@ class TelegramMediaBot:
         limit = int(arg) if arg.isdigit() and int(arg) > 0 else (get_startup_scan_count() or 30)
         await update.message.reply_text(f"🔎 開始掃描最近 {limit} 則訊息...")
         self.rescan_task = asyncio.create_task(self._scan_recent(limit, manual=True))
+
+    # ---------------------- /chats: download a whole group / channel ----------------------
+    # Pick a group / channel the account has joined, scan all its photos and videos, skip what was
+    # downloaded before (checked before downloading), choose a folder, download. A started download is
+    # saved in .tad/chat_jobs.json and resumed (rescanned) after a restart. (src/chat_scanner.py)
+    CHAT_BATCH = 50   # messages fetched at a time, right before they are downloaded (fresh file references)
+
+    async def handle_chats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        if not self._is_owner(user_id):
+            await update.message.reply_text("⛔ 只有 Bot 擁有者可以使用 /chats")
+            return
+        query = ' '.join(context.args or []).strip()
+        msg = await update.message.reply_text("📚 正在讀取已加入的群組 / 頻道...")
+        try:
+            chats = await chat_scanner.list_chats(self.client, query)
+        except Exception as e:
+            logger.error(f"讀取群組 / 頻道失敗: {e}")
+            await self._safe_edit(msg, f"❌ 讀取群組 / 頻道失敗: {e}")
+            return
+        self._chat_lists[user_id] = {'chats': chats, 'query': query}
+        text, markup = chat_scanner.render_chat_list(chats, 0, query)
+        await self._safe_edit_markup(msg, text, markup)
+
+    async def _handle_chats_callback(self, user_id: int, query):
+        if not self._is_owner(user_id):
+            await self._safe_edit(query.message, "⛔ 只有 Bot 擁有者可以使用 /chats")
+            return
+        data = query.data or ''
+        if data.startswith('ch_stop:'):
+            await self._stop_chat_download(data[8:], query.message)
+            return
+        if data == 'ch_scanstop':
+            scanning = self._chat_scanning.get(user_id)
+            if scanning:
+                scanning['stop'] = True
+            return
+        if data == 'ch_x':
+            self._chat_lists.pop(user_id, None)
+            await self._safe_edit(query.message, "📚 已關閉群組 / 頻道列表")
+            return
+        listing = self._chat_lists.get(user_id)
+        if not listing:
+            await self._safe_edit(query.message, "此列表已過期，請重新輸入 /chats")
+            return
+        try:
+            if data.startswith('ch_pg:'):
+                text, markup = chat_scanner.render_chat_list(listing['chats'], int(data[6:]), listing['query'])
+                await self._safe_edit_markup(query.message, text, markup)
+            elif data.startswith('ch_pick:'):
+                index = int(data[8:])
+                if 0 <= index < len(listing['chats']):
+                    self._chat_lists.pop(user_id, None)
+                    chat = listing['chats'][index]
+                    # scanning a big channel takes a while: don't block the update handler
+                    task = asyncio.create_task(self._scan_chat_and_queue(user_id, chat, query.message))
+                    self._chat_scanning.setdefault(user_id, {'stop': False})['task'] = task
+        except ValueError:
+            pass
+
+    def _chat_stop_markup(self, chat_id) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([[InlineKeyboardButton("⏹ 停止下載", callback_data=f"ch_stop:{chat_id}")]])
+
+    async def _scan_chat_and_queue(self, user_id: int, chat: dict, message):
+        title = chat['title']
+        flag = self._chat_scanning.get(user_id) or {'stop': False}
+        if flag.get('running'):
+            await self._safe_edit(message, "⏳ 已有一個掃描在進行中，請等它完成後再試")
+            return
+        flag['running'] = True
+        self._chat_scanning[user_id] = flag
+        stop_markup = InlineKeyboardMarkup([[InlineKeyboardButton("✖ 停止掃描", callback_data="ch_scanstop")]])
+        try:
+            await self._safe_edit_markup(message, f"🔎 正在掃描「{title}」的照片與影片...", stop_markup)
+
+            async def progress(s):
+                await self._safe_edit_markup(
+                    message, f"🔎 正在掃描「{title}」...\n已檢查 {s['total']} 個媒體，其中 {len(s['ids'])} 個尚未下載",
+                    stop_markup)
+
+            scan = await chat_scanner.scan_chat(self.client, chat['entity'], self._is_media_downloaded,
+                                                self.downloader.get_media_size, progress, lambda: flag['stop'])
+        except Exception as e:
+            logger.error(f"掃描「{title}」失敗: {e}")
+            await self._safe_edit(message, f"❌ 掃描「{title}」失敗: {e}")
+            return
+        finally:
+            self._chat_scanning.pop(user_id, None)
+
+        if scan['stopped']:
+            await self._safe_edit(message, f"⏹ 已停止掃描「{title}」")
+            return
+        if not scan['ids']:
+            await self._safe_edit(
+                message, f"✅ 「{title}」共 {scan['total']} 個照片 / 影片，全部都已下載過（含已刪除的）")
+            return
+        logger.info(f"/chats：「{title}」共 {scan['total']} 個媒體，{len(scan['ids'])} 個尚未下載")
+        job = {'chat_id': chat['id'], 'title': title, 'user_id': user_id, 'entity': chat['entity'], 'scan': scan}
+        await self.submit_flow(user_id, f"「{title}」{len(scan['ids'])} 個媒體", message,
+                               partial(self._present_chat_job, user_id, job, message))
+
+    async def _present_chat_job(self, user_id: int, job: dict, message):
+        """The chat's turn in the queue: the usual folder selector, then _run_chat_download."""
+        nav_text, markup = self.folder_navigator.start_folder_selection(
+            user_id, [], {'video': job['scan']['videos'], 'photo': job['scan']['photos'], 'document': 0})
+        self.folder_navigator.get_user_state(user_id).pending_job = partial(self._run_chat_download, job)
+        await message.edit_text(f"{chat_scanner.scan_summary(job['title'], job['scan'])}\n\n{nav_text}",
+                                reply_markup=markup)
+
+    async def _chat_entity(self, chat_id: int):
+        try:
+            return await self.client.get_entity(chat_id)
+        except Exception:
+            async for d in self.client.iter_dialogs():
+                if d.id == chat_id:
+                    return d.entity
+        raise ValueError('找不到這個群組 / 頻道（帳號可能已經退出）')
+
+    async def _run_chat_download(self, job: dict, folder: str, status):
+        """Download the not-yet-downloaded media of a chat into `folder` (also used to resume after a restart)."""
+        base = self.folder_navigator.base_path
+        title = job['title']
+        rel = os.path.relpath(folder, base)
+        job['folder'] = '' if rel == '.' else rel.replace(os.sep, '/')
+        chat_scanner.save_job(base, job)
+        run = {'chat_id': str(job['chat_id']), 'stopped': False, 'task': None}
+        self._chat_run = run
+        prog = None
+        try:
+            os.makedirs(folder, exist_ok=True)
+            entity = job.get('entity') or await self._chat_entity(int(job['chat_id']))
+            scan = job.get('scan')
+            if scan is None:   # resumed after a restart: scan again, what is already there is skipped
+                await self._safe_edit_markup(status, f"🔎 繼續下載「{title}」：重新掃描中...",
+                                             self._chat_stop_markup(job['chat_id']))
+                scan = await chat_scanner.scan_chat(self.client, entity, self._is_media_downloaded,
+                                                    self.downloader.get_media_size,
+                                                    should_stop=lambda: run['stopped'])
+            prog = {'done': 0, 'failed': 0, 'skipped': 0, 'total': len(scan['ids']), 'start': time.time()}
+            if not run['stopped']:
+                run['task'] = asyncio.create_task(self._download_chat_ids(entity, scan, folder, status, title, run, prog))
+                await run['task']
+        except asyncio.CancelledError:
+            if not run['stopped']:
+                raise          # the bot is stopping: keep the job, it continues at the next start
+        except Exception as e:  # e.g. the account left the chat: don't retry this at every start
+            logger.error(f"/chats：下載「{title}」失敗: {e}")
+            chat_scanner.remove_job(base, job['chat_id'])
+            await self._safe_edit(status, f"❌ 下載「{title}」失敗: {e}\n可再用 /chats 重試，已下載的會略過")
+            return
+        finally:
+            self._chat_run = None
+
+        chat_scanner.remove_job(base, job['chat_id'])
+        prog = prog or {'done': 0, 'failed': 0, 'skipped': 0, 'total': 0, 'start': time.time()}
+        if run['stopped']:
+            head = f"⏹ 已停止下載「{title}」"
+            tail = "再次 /chats 選同一個群組 / 頻道會從尚未下載的繼續"
+        else:
+            head = f"✅ 「{title}」下載完成"
+            tail = "失敗的項目可再用 /chats 選同一個群組 / 頻道重新下載" if prog['failed'] else ""
+        text = f"{head}\n{self._chat_progress_text(title, folder, prog, header=False)}"
+        await self._safe_edit(status, f"{text}\n{tail}".strip())
+        logger.info(f"/chats：「{title}」{'已停止' if run['stopped'] else '完成'} - 成功 {prog['done']}，"
+                    f"失敗 {prog['failed']}，略過 {prog['skipped']}")
+
+    async def _download_chat_ids(self, entity, scan: dict, folder: str, status, title: str, run: dict, prog: dict):
+        """Fetch the messages in batches right before downloading them (5 at a time); each one is checked
+        again first, so files downloaded meanwhile (or by an earlier, interrupted run) are skipped."""
+        ids, captions = scan['ids'], scan['captions']
+        workers = self.downloader.max_concurrent_downloads
+        pipe = asyncio.Queue(maxsize=self.CHAT_BATCH)
+        self.downloader.set_message_callback(None)
+        self.monitor.update_stats({'total_files': len(ids), 'completed_files': 0, 'failed_files': 0,
+                                   'total_size': scan['size'], 'downloaded_size': 0, 'start_time': time.time()})
+
+        async def producer():
+            for i in range(0, len(ids), self.CHAT_BATCH):
+                batch = ids[i:i + self.CHAT_BATCH]
+                while True:
+                    try:
+                        msgs = await self.client.get_messages(entity, ids=batch)
+                        break
+                    except FloodWaitError as e:
+                        logger.warning(f"/chats：觸發限流，等待 {e.seconds} 秒")
+                        await asyncio.sleep(e.seconds + 1)
+                msgs = [m for m in msgs if m is not None and getattr(m, 'media', None)]
+                prog['skipped'] += len(batch) - len(msgs)          # deleted from the chat meanwhile
+                describe(msgs, captions=captions)
+                for m in msgs:
+                    if self._is_media_downloaded(m):
+                        prog['skipped'] += 1
+                        continue
+                    await pipe.put(m)
+            for _ in range(workers):
+                await pipe.put(None)
+
+        async def worker():
+            while True:
+                m = await pipe.get()
+                if m is None:
+                    return
+                try:
+                    files = await self.downloader.download_media_from_message(m, folder)
+                except asyncio.CancelledError:
+                    named = MediaDownloader.file_name_for(m)
+                    if named:                              # don't leave a half-written .part behind
+                        try:
+                            os.remove(os.path.join(folder, named[0] + '.part'))
+                        except OSError:
+                            pass
+                    raise
+                prog['done' if files else 'failed'] += 1
+
+        async def ticker():
+            while True:
+                await asyncio.sleep(5)
+                await self._safe_edit_markup(status, self._chat_progress_text(title, folder, prog),
+                                             self._chat_stop_markup(run['chat_id']))
+
+        tick = asyncio.create_task(ticker())
+        try:
+            await self._safe_edit_markup(status, self._chat_progress_text(title, folder, prog),
+                                         self._chat_stop_markup(run['chat_id']))
+            await asyncio.gather(producer(), *(worker() for _ in range(workers)))
+        finally:
+            tick.cancel()
+
+    def _chat_progress_text(self, title: str, folder: str, prog: dict, header: bool = True) -> str:
+        size = (self.monitor.get_stats().get('downloaded_size') or 0) / 1024 ** 2
+        elapsed = max(time.time() - prog['start'], 1)
+        handled = prog['done'] + prog['failed'] + prog['skipped']
+        lines = [f"📥 下載「{title}」：{handled}/{prog['total']}"] if header else []
+        lines += [f"成功 {prog['done']}・失敗 {prog['failed']}・略過 {prog['skipped']}",
+                  f"已下載 {size:.1f} MB・平均 {size / elapsed:.1f} MB/s・耗時 {elapsed / 60:.1f} 分鐘",
+                  f"儲存位置: {folder}"]
+        return "\n".join(lines)
+
+    async def _stop_chat_download(self, chat_id: str, message):
+        run = self._chat_run
+        if not run or run['chat_id'] != chat_id:
+            await self._safe_edit(message, "ℹ️ 這個下載已經結束")
+            return
+        run['stopped'] = True
+        if run.get('task'):
+            run['task'].cancel()
+
+    async def _resume_chat_jobs(self):
+        """Queue the chat downloads that were still running when the bot stopped."""
+        base = self.folder_navigator.base_path
+        for job in chat_scanner.load_jobs(base).values():
+            try:
+                folder = os.path.normpath(os.path.join(base, job.get('folder') or ''))
+                if os.path.commonpath([os.path.abspath(folder), base]) != base:
+                    folder = base                        # never write outside the downloads folder
+                job = {'chat_id': int(job['chat_id']), 'title': str(job.get('title') or job['chat_id']),
+                       'user_id': int(job.get('user_id') or self.owner_id), 'started': job.get('started')}
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning(f"略過無法讀取的頻道下載工作: {e}")
+                continue
+            item = FlowItem(f"繼續下載「{job['title']}」", job['user_id'], None, None)
+            item.present = partial(self._present_resumed_chat_job, item, job, folder)
+            await self.enqueue_flow(item)
+            logger.info(f"/chats：上次未完成的「{job['title']}」已加入佇列")
+
+    async def _present_resumed_chat_job(self, item: FlowItem, job: dict, folder: str):
+        item.message = await self.app.bot.send_message(
+            chat_id=item.user_id, text=f"⏯ 繼續上次未完成的下載：「{job['title']}」→ {folder}")
+        await self._run_chat_download(job, folder, item.message)
 
     # ---------------------- utilities ----------------------
     def notify_owner_threadsafe(self, loop, text: str):
@@ -1301,6 +1589,7 @@ class TelegramMediaBot:
                 await self.app.bot.set_my_commands([
                     BotCommand('files', '瀏覽 / 預覽 / 刪除已下載的檔案'),
                     BotCommand('rescan', '重新掃描最近的訊息，找出尚未下載的項目'),
+                    BotCommand('chats', '選擇已加入的群組 / 頻道，下載全部照片與影片'),
                 ])
             except Exception as e:
                 logger.warning(f'設定 Bot 指令選單失敗: {e}')
@@ -1311,6 +1600,7 @@ class TelegramMediaBot:
 
             self.queue_task = asyncio.create_task(self._queue_worker())
             self.scan_task = asyncio.create_task(self._startup_scan())
+            await self._resume_chat_jobs()
 
             while True:
                 await asyncio.sleep(1)

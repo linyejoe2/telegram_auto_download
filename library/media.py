@@ -133,10 +133,14 @@ def _write_sidecar(video: str, data: dict):
 def save_meta(video: str, meta: dict):
     """Write the library's fields; the "download" record on disk is kept as is (src/records.py owns it)."""
     with _meta_lock:
-        stored = read_sidecar(video).get('download')
+        on_disk = read_sidecar(video)
+        stored = on_disk.get('download')
         data = {k: v for k, v in meta.items() if k != 'download'}
         if stored:
             data['download'] = stored
+        # the bot may have added the Telegram message text after the library loaded this sidecar
+        if 'description' not in data and on_disk.get('description'):
+            data['description'] = on_disk['description']
         _write_sidecar(video, data)
 
 

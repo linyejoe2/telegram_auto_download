@@ -265,6 +265,7 @@ class Library:
             'folder': folder,
             'actors': meta.get('actors') or [],
             'series': meta.get('series') or '',
+            'description': meta.get('description') or '',   # Telegram message text; matched by the search
             'duration': info.get('duration'),
             'width': info.get('width'),
             'height': info.get('height'),
@@ -403,6 +404,8 @@ class Library:
             meta['series'] = str(fields['series'] or '').strip()[:200]
         if 'source' in fields:
             meta['source'] = str(fields['source'] or '').strip()[:2000]
+        if 'description' in fields:              # per file (not shared by the versions)
+            meta['description'] = str(fields['description'] or '').strip()[:5000]
         self._save(entry)
         if meta.get('group'):                # title / actors / series are shared by all versions
             for mid, m in self._group_members(meta['group']):

@@ -10,6 +10,26 @@ from .records import DownloadRecords
 
 logger = logging.getLogger(__name__)
 
+# The Telegram message text stored as the file's `description` (sidecar, editable in the web library)
+DESCRIPTION_ATTR = 'tad_description'
+
+
+def describe(messages, root=None, captions=None):
+    """Set each message's description: its own text, else its album's caption (from `captions`
+    {grouped_id: text} or the other messages of the list), else the text of `root` (the original
+    post when these are its replies). Messages that already have one are left alone."""
+    captions = dict(captions or {})
+    for m in messages:
+        text = (getattr(m, 'message', '') or '').strip()
+        if getattr(m, 'grouped_id', None) and text:
+            captions.setdefault(m.grouped_id, text)
+    root_text = (getattr(root, 'message', '') or '').strip() if root is not None else ''
+    for m in messages:
+        if getattr(m, DESCRIPTION_ATTR, None) is None:
+            text = (getattr(m, 'message', '') or '').strip()
+            setattr(m, DESCRIPTION_ATTR, text or captions.get(getattr(m, 'grouped_id', None), '') or root_text)
+    return messages
+
 
 class MediaDownloader:
     """處理媒體文件下載的類"""
@@ -201,7 +221,8 @@ class MediaDownloader:
                     downloaded_files.append(file_name)
                     logger.info(f"下載{label}: {file_name}")
                     self._record_download_to_db(message, file_name, file_path, file_type, download_dir,
-                                                original_name or None, mime_type)
+                                                original_name or None, mime_type,
+                                                description=getattr(message, DESCRIPTION_ATTR, None))
                 else:
                     logger.error(f"{label}下載失敗: {file_name}")
             return downloaded_files
@@ -214,7 +235,8 @@ class MediaDownloader:
         """並發下載多個消息的媒體文件"""
         if not messages:
             return []
-        
+        describe(messages)   # album captions for the files that have no text of their own
+
         # 過濾已下載的文件
         messages_to_download = []
         skipped_count = 0
@@ -333,8 +355,9 @@ class MediaDownloader:
             logger.debug(f"獲取文件唯一 ID 時出錯: {e}")
         return None
     
-    def _record_download_to_db(self, message, file_name, file_path, file_type, download_dir, original_file_name=None, mime_type=None):
-        """記錄下載信息到資料庫"""
+    def _record_download_to_db(self, message, file_name, file_path, file_type, download_dir, original_file_name=None,
+                               mime_type=None, description=None):
+        """記錄下載信息（檔案旁的 sidecar）；description 預設為訊息文字"""
         try:
             file_unique_id = self._get_file_unique_id(message)
             if not file_unique_id:
@@ -359,7 +382,8 @@ class MediaDownloader:
                 file_size=file_size,
                 file_type=file_type,
                 mime_type=mime_type,
-                message_date=message.date
+                message_date=message.date,
+                description=(getattr(message, 'message', '') or '').strip() if description is None else description,
             )
             
             if success:

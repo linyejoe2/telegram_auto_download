@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.4.0] - 2026-11-24 - Chat Download & Message Description
+### Added
+- Owner-only `/chats [關鍵字]` (also in the command menu): lists the joined groups / channels (10 per page, name filter), scans the whole history for photos and videos with Telegram's filter (`src/chat_scanner.py`, ✖ 停止掃描), skips what is already downloaded (deleted ones too) before downloading, shows a summary above the usual folder selector and queues with `submit_flow` (`bot.py` `_run_chat_download()`, `_download_chat_ids()`, `NavigationState.pending_job`)
+- Downloads run 5 at a time, messages fetched in batches of 50 (`CHAT_BATCH`) and re-checked first, progress every 5 s with ⏹ 停止下載 (removes the half-written `.part`); a running job is saved in `<downloads>/.tad/chat_jobs.json` and `_resume_chat_jobs()` continues it after a restart (rescan, skip what exists)
+- Message description: every Telegram download stores the original text (its own, else the album caption, else the root post for replies) as `description` in the sidecar (`downloader.py` `describe()`, `records.py` `KEPT_LIBRARY_FIELDS`, so it survives delete + re-download); the web library item page has an editable 描述 box and the search matches it (`store.py` `_apply()`, `VideoPage.jsx`, `Library.jsx`)
+
 ## [3.3.5] - 2026-11-23 - Drag-select
 ### Added
 - Web library drag-select (mouse): drag on empty space draws a box and selects every item it touches; no key replaces the selection, Shift adds, Ctrl/⌘ toggles; the page scrolls near the top / bottom edge; a click on empty space clears the selection (`Library.jsx`)
