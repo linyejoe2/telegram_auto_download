@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, fmtBitrate, fmtDuration, fmtSize, MEDIA, resolutionLabel } from '../api.js'
 import Player from '../components/Player.jsx'
+import AppMenu from '../components/AppMenu.jsx'
 import TagInput from '../components/TagInput.jsx'
 
 function InfoRow({ label, children }) {
@@ -30,7 +31,7 @@ function remember(map, key, value) {
 const formOf = (v) => ({ _id: v.id, title: v.title, actors: v.actors, series: v.series, source: v.source, description: v.description || '' })
 const SWIPE_MIN = 60 // px a finger must travel to switch photo
 
-export default function VideoPage({ guard }) {
+export default function VideoPage({ guard, onLogout }) {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
@@ -247,7 +248,10 @@ export default function VideoPage({ guard }) {
     <div className="mx-auto max-w-[1400px] px-4 pb-16">
       <div className="flex items-center gap-3 py-3">
         <Link to={backTo} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">← 返回</Link>
-        <h1 className="truncate text-lg font-semibold" title={video.title}>{video.title}</h1>
+        <h1 className="min-w-0 truncate text-lg font-semibold" title={video.title}>{video.title}</h1>
+        <div className="ml-auto">
+          <AppMenu onLogout={onLogout} />
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">

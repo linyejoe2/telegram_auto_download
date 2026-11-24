@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, storedKind } from '../api.js'
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
+import AppMenu from '../components/AppMenu.jsx'
 import { BulkEditDialog, ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
 
 const SORTS = {
@@ -144,11 +145,6 @@ export default function Library({ guard, onLogout }) {
     setBusy(true)
     await act(() => api.rescan())
     setBusy(false)
-  }
-
-  async function logout() {
-    await api.logout().catch(() => {})
-    onLogout()
   }
 
   // ── folder / file actions ──
@@ -536,23 +532,28 @@ export default function Library({ guard, onLogout }) {
                   onClick={() => switchView('grid')}
                   className={`px-2.5 py-1.5 text-sm ${view === 'grid' ? 'bg-white/15' : 'bg-neutral-800 hover:bg-neutral-700'}`}
                   title="卡片"
+                  aria-label="卡片"
                 >
-                  ▦
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                    <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="currentColor" />
+                  </svg>
                 </button>
                 <button
                   onClick={() => switchView('list')}
                   className={`px-2.5 py-1.5 text-sm ${view === 'list' ? 'bg-white/15' : 'bg-neutral-800 hover:bg-neutral-700'}`}
                   title="列表"
+                  aria-label="列表"
                 >
-                  ☰
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                    <path d="M4 5h4v4H4zM4 15h4v4H4z" fill="currentColor" />
+                    <path d="M11 7h9M11 17h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
                 </button>
               </div>
               <button onClick={rescan} disabled={busy} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50">
                 {busy ? '掃描中…' : '重新掃描'}
               </button>
-              <button onClick={logout} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">
-                登出
-              </button>
+              <AppMenu onLogout={onLogout} />
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -568,13 +569,6 @@ export default function Library({ guard, onLogout }) {
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => navigate('/history')}
-              className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
-              title="所有下載過的檔案，已刪除的可以重新下載"
-            >
-              📜 下載紀錄
-            </button>
             <button
               onClick={() => (selecting ? exitSelect() : setSelecting(true))}
               aria-pressed={selecting}

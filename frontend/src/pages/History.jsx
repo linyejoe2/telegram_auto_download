@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, fmtSize } from '../api.js'
+import AppMenu from '../components/AppMenu.jsx'
 
 // 下載紀錄: every file the bot downloaded. Existing videos / photos open their page; deleted files
 // can be downloaded again (the running bot puts it in its queue, progress shows in Telegram).
@@ -13,7 +14,7 @@ const STATUS = [
   ['deleted', '已刪除', 'deleted'],
 ]
 
-export default function History({ guard }) {
+export default function History({ guard, onLogout }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const q = params.get('q') || ''
@@ -103,9 +104,11 @@ export default function History({ guard }) {
     <div className="mx-auto max-w-[1400px] px-4 pb-16">
       <header className="sticky top-0 z-10 -mx-4 mb-4 space-y-3 bg-neutral-950/90 px-4 py-3 backdrop-blur">
         <div className="flex items-center gap-3">
-          <Link to="/" className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700">← 媒體庫</Link>
           <h1 className="text-lg font-semibold">下載紀錄</h1>
           {data && <span className="text-sm text-neutral-400">{data.total} 筆</span>}
+          <div className="ml-auto">
+            <AppMenu onLogout={onLogout} />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex overflow-hidden rounded-lg ring-1 ring-white/10" role="group" aria-label="狀態">

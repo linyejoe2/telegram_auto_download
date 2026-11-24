@@ -1,5 +1,16 @@
 # ChangeLog
 
+## [3.4.3] - 2026-11-24 - Settings Page & Side Menu
+### Added
+- Web library ☰ side menu at the top right of every page (`AppMenu.jsx`): 🎬 媒體庫 / 📜 下載紀錄 / ⚙ 設定 and 登出; new 設定 page `/settings` (`Settings.jsx`, `settings.js`) with the default playback quality (原始 or a transcode level with its cap and data per hour) and fullscreen 填滿 / 完整, saved per browser (`tad.quality`, `tad.fill`)
+### Changed
+- Player starts at the 設定 default; a quality picked in the player now applies to that video only; 原始 on a file the browser can't play uses the best transcode level (`Player.jsx`); library cards keep the cover clean, length / resolution / version count sit on one grey line under the title (`VideoCard.jsx`); 📜 下載紀錄 and 登出 buttons moved into the menu
+
+## [3.4.2] - 2026-11-24 - Mobile Player
+### Fixed
+- Web library player on phones: controls no longer overflow (two rows: time / seek bar / total, then play, ±10s, 畫質, fullscreen; volume slider and 即時轉檔 label hidden on narrow / touch screens); 畫質 shows only the short label; controls auto-hide after 3 s while playing, a tap shows / hides them and a round middle button plays / pauses (`Player.jsx`)
+- Fullscreen fits the phone screen: video fills it (no black bars) with a 完整 / 填滿 toggle (`tad.fill`), reaches under the notch with safe-area padding, turns to the video's orientation; original-file mode's F key fullscreens the video itself (iPhone `webkitEnterFullscreen()`)
+
 ## [3.4.1] - 2026-11-24 - Player Quality Levels
 ### Changed
 - Web library player: 畫質 menu for every video (direct and transcode mode; position kept when switching): 原始 (only when the browser can play the file; shows its bit rate) and 2160p, 1080p 高 / 低, 720p 高 / 低, 480p 高 / 低 with capped bit rates; only levels that fit the video are offered, the choice is remembered per browser (`tad.quality`) (`Player.jsx`, `library/media.py` `STREAM_LEVELS`, `stream_qualities()`, `store.py` `detail()` `qualities`)

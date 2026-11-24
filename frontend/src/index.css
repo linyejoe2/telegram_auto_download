@@ -3,6 +3,19 @@
 @theme {
   --color-accent: #e5484d;
   --color-accent-hover: #f2555a;
+  --animate-slide-in-right: slide-in-right 0.2s ease-out;
+  --animate-fade-in: fade-in 0.2s ease-out;
+
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
 }
 
 html, body, #root {

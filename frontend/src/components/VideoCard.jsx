@@ -43,10 +43,15 @@ function Check({ on, className = '' }) {
   )
 }
 
+// the cover stays clean (only the select check in select mode); length, resolution and versions go
+// under the title
 export default function VideoCard({ video, search, onMenu, selecting, selected, onSelect, dragIds }) {
   const photo = video.kind === 'photo'
-  const res = photo ? null : resolutionLabel(video.width, video.height)
-  const badge = selecting ? 'left-10' : 'left-2'
+  const meta = [
+    photo ? dimensions(video.width, video.height) : video.duration != null && fmtDuration(video.duration),
+    !photo && resolutionLabel(video.width, video.height),
+    video.versions > 1 && `${video.versions} 個版本`,
+  ].filter(Boolean)
   return (
     <Link
       to={`/v/${video.id}`}
@@ -72,25 +77,10 @@ export default function VideoCard({ video, search, onMenu, selecting, selected, 
           </div>
         )}
         {selecting && <Check on={selected} className="absolute left-2 top-2" />}
-        {res && <span className={`absolute ${badge} top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium`}>{res}</span>}
-        {photo && <span className={`absolute ${badge} top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px]`} aria-label="圖片">🖼</span>}
-        {video.versions > 1 && (
-          <span className="absolute right-2 top-2 rounded bg-accent/90 px-1.5 py-0.5 text-[11px] font-medium">{video.versions} 個版本</span>
-        )}
-        {photo
-          ? dimensions(video.width, video.height) && (
-              <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums">
-                {dimensions(video.width, video.height)}
-              </span>
-            )
-          : video.duration != null && (
-              <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] tabular-nums">
-                {fmtDuration(video.duration)}
-              </span>
-            )}
       </div>
       <div className="space-y-1 p-3">
         <h3 className="line-clamp-2 text-sm font-medium leading-snug" title={video.title}>{video.title}</h3>
+        {meta.length > 0 && <p className="truncate text-xs tabular-nums text-neutral-500">{meta.join(' · ')}</p>}
         {video.series && <p className="truncate text-xs text-accent">{video.series}</p>}
         {video.actors.length > 0 && <p className="truncate text-xs text-neutral-400">{video.actors.join('、')}</p>}
       </div>
