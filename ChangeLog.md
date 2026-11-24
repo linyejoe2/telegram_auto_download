@@ -1,5 +1,10 @@
 # ChangeLog
 
+## [3.4.1] - 2026-11-24 - Player Quality Levels
+### Changed
+- Web library player: 畫質 menu for every video (direct and transcode mode; position kept when switching): 原始 (only when the browser can play the file; shows its bit rate) and 2160p, 1080p 高 / 低, 720p 高 / 低, 480p 高 / 低 with capped bit rates; only levels that fit the video are offered, the choice is remembered per browser (`tad.quality`) (`Player.jsx`, `library/media.py` `STREAM_LEVELS`, `stream_qualities()`, `store.py` `detail()` `qualities`)
+- Live transcode `/library/media/{id}/stream?t=&q=<level>` (was `h=`) fits the level's box, never upscales and caps the bit rate (`stream_command()`); uses NVIDIA NVENC when available (falls back to the CPU per stream), `STREAM_ENCODER=cpu` in `.env` forces the CPU (`stream_encoder()`)
+
 ## [3.4.0] - 2026-11-24 - Chat Download & Message Description
 ### Added
 - Owner-only `/chats [關鍵字]` (also in the command menu): lists the joined groups / channels (10 per page, name filter), scans the whole history for photos and videos with Telegram's filter (`src/chat_scanner.py`, ✖ 停止掃描), skips what is already downloaded (deleted ones too) before downloading, shows a summary above the usual folder selector and queues with `submit_flow` (`bot.py` `_run_chat_download()`, `_download_chat_ids()`, `NavigationState.pending_job`)

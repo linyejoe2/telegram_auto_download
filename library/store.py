@@ -292,6 +292,7 @@ class Library:
                 'shots': [f"{MEDIA_URL}/{vid}/shots/{s}" for s in meta.get('shots') or []],
                 'direct': media.direct_playable(entry['path'], info),
                 'mime': media.mime_codecs(entry['path'], info),
+                'qualities': media.stream_qualities(info) if entry['kind'] == 'video' else [],
                 'processing': vid in self._pending,
                 'error': entry.get('error'),
                 'versions': self._versions(vid, entry) if entry['kind'] == 'video' else [],

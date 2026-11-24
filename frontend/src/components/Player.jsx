@@ -1,11 +1,58 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fmtDuration, MEDIA } from '../api.js'
+import { fmtBitrate, fmtDuration, MEDIA } from '../api.js'
 
-const QUALITIES = [480, 720, 1080]
+// transcode levels, best first (library/media.py STREAM_LEVELS); the server sends the ones that fit the video
+const RANK = ['2160', '1080h', '1080l', '720h', '720l', '480h', '480l']
+const ORIGINAL = 'orig'
+const QUALITY_KEY = 'tad.quality'
 
-// Plays the original file when the browser can (native controls). Otherwise the server transcodes
-// live (ffmpeg -> fragmented MP4 from `offset` seconds), which can't be seeked by the browser itself,
-// so seeking restarts the stream at the new position and the controls show offset + currentTime.
+function storedQuality() {
+  try {
+    return localStorage.getItem(QUALITY_KEY)
+  } catch {
+    return null
+  }
+}
+
+function rememberQuality(q) {
+  try {
+    localStorage.setItem(QUALITY_KEY, q)
+  } catch {}
+}
+
+// the best offered level not above `wanted`
+function levelAtMost(levels, wanted) {
+  const max = Math.max(0, RANK.indexOf(wanted))
+  return (levels.find((l) => RANK.indexOf(l.key) >= max) || levels[levels.length - 1])?.key || '720h'
+}
+
+function initialQuality(levels, canDirect) {
+  const saved = storedQuality()
+  if (saved === ORIGINAL) return canDirect ? ORIGINAL : levels[0]?.key || '720h'
+  if (RANK.includes(saved)) return levelAtMost(levels, saved)
+  return canDirect ? ORIGINAL : levelAtMost(levels, '720h')
+}
+
+const kbpsText = (kbps) => (kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`)
+
+function QualitySelect({ value, onChange, levels, canDirect, bitRate, className = '' }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} title="畫質（較低的畫質用較少流量）"
+      className={`rounded bg-white/10 px-1 py-0.5 text-xs text-neutral-200 ${className}`}>
+      {canDirect && (
+        <option value={ORIGINAL} className="bg-neutral-900">原始{bitRate ? ` · ${fmtBitrate(bitRate)}` : ''}</option>
+      )}
+      {levels.map((l) => (
+        <option key={l.key} value={l.key} className="bg-neutral-900">{l.label} · ≤{kbpsText(l.kbps)}</option>
+      ))}
+    </select>
+  )
+}
+
+// Plays the original file when the browser can and 原始 is chosen (native controls). Otherwise the server
+// transcodes live at the chosen level (ffmpeg -> fragmented MP4 from `offset` seconds, bit rate capped),
+// which can't be seeked by the browser itself, so seeking restarts the stream at the new position and
+// the controls show offset + currentTime. The 畫質 choice is remembered per browser.
 export default function Player({ video, startAt = 0, onTime }) {
   const ref = useRef(null)
   const box = useRef(null)
@@ -14,17 +61,27 @@ export default function Player({ video, startAt = 0, onTime }) {
     () => video.direct && document.createElement('video').canPlayType(video.mime) !== '',
     [video.id],
   )
-  const [mode, setMode] = useState(canDirect ? 'direct' : 'stream')
+  const levels = video.qualities?.length ? video.qualities : [{ key: '720h', label: '720p', kbps: 4128 }]
+  const [quality, setQuality] = useState(() => initialQuality(levels, canDirect))
+  const mode = quality === ORIGINAL && canDirect ? 'direct' : 'stream'
   const [offset, setOffset] = useState(startAt)
-  const [quality, setQuality] = useState(720)
   const [time, setTime] = useState(startAt)
   const [playing, setPlaying] = useState(false)
   const [waiting, setWaiting] = useState(true)
   const [volume, setVolume] = useState(1)
   const [dragging, setDragging] = useState(null)
 
-  const src = mode === 'direct' ? `${MEDIA}/${video.id}/file` : `${MEDIA}/${video.id}/stream?t=${offset.toFixed(2)}&h=${quality}`
+  const src = mode === 'direct' ? `${MEDIA}/${video.id}/file` : `${MEDIA}/${video.id}/stream?t=${offset.toFixed(2)}&q=${quality}`
   const now = () => (mode === 'direct' ? ref.current?.currentTime || 0 : offset + (ref.current?.currentTime || 0))
+
+  function changeQuality(q) {
+    const t = now()
+    setOffset(t)
+    setTime(t)
+    setWaiting(true)
+    setQuality(q)
+    rememberQuality(q)
+  }
 
   function seek(t) {
     t = Math.max(0, Math.min(duration ? duration - 1 : t, t))
@@ -77,22 +134,31 @@ export default function Player({ video, startAt = 0, onTime }) {
       if (dragging === null) setTime(now())
     },
     onLoadedMetadata: () => {
-      if (mode === 'direct' && startAt && ref.current.currentTime < 1) ref.current.currentTime = startAt
+      // direct play starts at `offset` (the page's start time, or where the stream was when switching)
+      if (mode === 'direct' && offset > 0.5 && ref.current.currentTime < 1) ref.current.currentTime = offset
     },
     onError: () => {
       if (mode === 'direct') {
-        // the browser could not decode the original after all: fall back to live transcoding
+        // the browser could not decode the original after all: fall back to live transcoding (not remembered)
         setOffset(time)
-        setMode('stream')
+        setQuality(levelAtMost(levels, '720h'))
       }
     },
   }
+
+  const select = (cls) => (
+    <QualitySelect value={quality} onChange={changeQuality} levels={levels} canDirect={canDirect}
+      bitRate={video.info?.bit_rate} className={cls} />
+  )
 
   if (mode === 'direct') {
     return (
       <div ref={box} className="overflow-hidden rounded-xl bg-black">
         <video ref={ref} src={src} controls autoPlay playsInline className="aspect-video w-full bg-black" {...events} />
-        <p className="px-3 py-1.5 text-xs text-neutral-500">原始檔播放 · 快捷鍵：空白鍵播放/暫停，←/→ 跳 10 秒，F 全螢幕</p>
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-neutral-500">
+          <span className="min-w-0">原始檔播放 · 快捷鍵：空白鍵播放/暫停，←/→ 跳 10 秒，F 全螢幕</span>
+          {select('ml-auto shrink-0')}
+        </div>
       </div>
     )
   }
@@ -147,20 +213,7 @@ export default function Player({ video, startAt = 0, onTime }) {
             onChange={(e) => setVolume(Number(e.target.value))}
             title="音量"
           />
-          <select
-            value={quality}
-            onChange={(e) => {
-              setOffset(now())
-              setQuality(Number(e.target.value))
-              setWaiting(true)
-            }}
-            className="ml-auto rounded bg-white/10 px-1 py-0.5 text-xs"
-            title="轉檔畫質"
-          >
-            {QUALITIES.map((q) => (
-              <option key={q} value={q} className="bg-neutral-900">{q}p</option>
-            ))}
-          </select>
+          {select('ml-auto')}
           <span className="hidden text-xs text-amber-300 sm:inline">即時轉檔</span>
           <button onClick={fullscreen} className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20">全螢幕</button>
         </div>

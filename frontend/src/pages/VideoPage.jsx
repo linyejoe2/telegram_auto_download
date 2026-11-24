@@ -448,7 +448,7 @@ export default function VideoPage({ guard }) {
             <InfoRow label="音訊">{info.audio_codec ? `${info.audio_codec}${info.audio_channels ? ` · ${info.audio_channels}ch` : ''}${info.audio_sample_rate ? ` · ${info.audio_sample_rate / 1000} kHz` : ''}` : null}</InfoRow>
             <InfoRow label="片長">{duration ? fmtDuration(duration) : null}</InfoRow>
             <InfoRow label="檔案大小">{fmtSize(info.size || video.size)}</InfoRow>
-            <InfoRow label="播放方式">{video.direct ? '原始檔（不支援時自動轉檔）' : '即時轉檔'}</InfoRow>
+            <InfoRow label="播放方式">{video.direct ? '原始檔或即時轉檔（播放器右下選畫質）' : '即時轉檔（播放器右下選畫質）'}</InfoRow>
             <InfoRow label="位置">{`${video.folder ? video.folder + '/' : ''}${video.file}`}</InfoRow>
           </div>
           )}

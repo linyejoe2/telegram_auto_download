@@ -5,7 +5,7 @@ Everything lives under PREFIX (/library); "/" answers an empty page.
   /library/api/...            JSON API (login, videos / photos, tags, edit, delete, rescan,
                               download history + download again)                    — login required
   /library/media/<id>/file    original file with HTTP range support (direct play)    — login required
-  /library/media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start seconds>    — login required
+  /library/media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start s>&q=<level> — login required
   /library/media/<id>/shots/  auto screenshots                                       — login required
   /library/...                the React frontend (library/static, built by `npm run build` in frontend/)
 
@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 COOKIE = 'tad_session'
 PREFIX = '/library'          # the whole web app (frontend, API, media) lives under this path
 RESCAN_SECONDS = 5 * 60
-STREAM_HEIGHTS = (480, 720, 1080)
 _SHOT_RE = re.compile(r'^\d{2}\.jpg$')
 _NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
@@ -406,26 +405,27 @@ class LibraryServer:
             start = max(0.0, float(request.query.get('t', 0)))
         except ValueError:
             start = 0.0
-        height = int(request.query.get('h', 720)) if request.query.get('h', '').isdigit() else 720
-        height = height if height in STREAM_HEIGHTS else 720
+        key = request.query.get('q') or media.STREAM_DEFAULT
+        encoder = await asyncio.get_running_loop().run_in_executor(None, media.stream_encoder)
 
-        proc = await asyncio.create_subprocess_exec(
-            ffmpeg, '-hide_banner', '-loglevel', 'error', '-ss', f'{start:.3f}', '-i', path,
-            '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
-            '-vf', f"scale=-2:'min({height},ih)',format=yuv420p",
-            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '23',
-            '-g', '48', '-c:a', 'aac', '-b:a', '160k', '-ac', '2',
-            '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1',
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, creationflags=_NO_WINDOW,
-        )
+        async def spawn(encoder):
+            return await asyncio.create_subprocess_exec(
+                *media.stream_command(ffmpeg, path, start, key, encoder),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, creationflags=_NO_WINDOW)
+
+        proc = await spawn(encoder)
+        chunk = await proc.stdout.read(256 * 1024)
+        if not chunk and encoder != 'cpu' and await proc.wait() != 0:
+            # GPU encoder unavailable right now (e.g. NVENC session limit): use the CPU for this stream
+            logger.warning('影片庫：GPU 轉檔失敗，改用 CPU')
+            proc = await spawn('cpu')
+            chunk = await proc.stdout.read(256 * 1024)
         response = web.StreamResponse(headers={'Content-Type': 'video/mp4', 'Cache-Control': 'no-store'})
         await response.prepare(request)
         try:
-            while True:
-                chunk = await proc.stdout.read(256 * 1024)
-                if not chunk:
-                    break
+            while chunk:
                 await response.write(chunk)
+                chunk = await proc.stdout.read(256 * 1024)
         except (ConnectionResetError, asyncio.CancelledError):
             pass                              # viewer seeked / closed the player
         finally:

@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.4.0
+# Telegram Auto Download Bot v3.4.1
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, download-record tracking, and real-time progress.
 
@@ -49,7 +49,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.4.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.4.1.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -75,6 +75,7 @@ WEB_ENABLED=1           # optional: start the web video library with the bot (v3
 SIMILARITY_THRESHOLD=70 # optional: % similarity at which same-length videos are grouped as versions (v3.1.0)
 WEB_PORT=8765           # optional: library port (default 8765)
 WEB_HOST=0.0.0.0        # optional: 0.0.0.0 = any location, 127.0.0.1 = this PC only
+# STREAM_ENCODER=cpu   # optional: force CPU for the live transcode instead of NVIDIA NVENC (v3.4.1)
 # WEB_PASSWORD_HASH / WEB_SECRET are written by the GUI "Web Library" tab; set the password there
 
 # 3. Build the web library frontend (needs Node.js 18+ and ffmpeg/ffprobe in PATH)
@@ -210,7 +211,7 @@ A browser app (v3.0.0) for watching and managing the videos in your downloads fo
 - **Folder tree (v3.0.1):** the left side lists every folder with video counts; click to browse, `＋ 新增` adds a folder, drag a video or folder onto a folder to move it, right-click (or `⋯`) a folder to rename / add a sub folder / delete it (empty only) and right-click a video to open, rename, go to its folder or delete. Moved and renamed videos keep their info and screenshots.
 - **Library page:** card or list view (▦ / ☰, remembered per browser) of videos (cover = first screenshot, resolution and duration badges), search, filter by 主演 / 系列, sort by 最新加入 / 標題 / 片長 / 檔案大小 / 畫質 (resolution, then bit rate; the list view shows bit rate under the resolution, v3.0.2) (filters are kept in the URL), rescan, logout, and a count of videos still being processed.
 - **Video page:** cover with play button and a 3x3 screenshot grid (click a screenshot to play from there); edit 標題 / 主演 (multi-select tags) / 系列 / 來源 (auto-filled from the download record) / 描述 (v3.4.0: the original Telegram message text, editable, kept per file and not shared by versions; the library search matches it too); Video Info (size, bit rate, bit depth, codec, fps, audio, duration, playback mode, location); download the original, regenerate screenshots, delete (with confirmation).
-- **Playback:** the original file is played when the browser supports it; otherwise (or if it fails) the server transcodes live with ffmpeg to H.264/AAC with seek, ±10s, volume, 480/720/1080p, fullscreen and keys Space / ←/→ / F. Safari/iOS cannot play the live transcode.
+- **Playback:** the original file is played when the browser supports it; otherwise (or if it fails) the server transcodes live with ffmpeg to H.264/AAC with seek, ±10s, volume, fullscreen and keys Space / ←/→ / F. Safari/iOS cannot play the live transcode. (v3.4.1) A 畫質 menu is in both modes: 原始 (only when playable, shows the file bit rate) and 2160p, 1080p 高 / 低, 720p 高 / 低, 480p 高 / 低 (video max 16000 / 8000 / 4500 / 4000 / 2000 / 1500 / 800 kbps); only levels that fit the video are offered, switching keeps the position and the choice is remembered per browser. Transcoding uses an NVIDIA GPU (NVENC) when available, else the CPU; set `STREAM_ENCODER=cpu` to force the CPU.
 - **Where data is stored:** next to each video as hidden files `.<file>.meta.json` (title, actors, series, source, description, cached info) and `.<file>.shots/01.jpg-09.jpg`; the chat `/files` viewer skips them. Deleting from the web also removes the video, these files and the hidden `.720p_h265` copy. The downloads folder is rescanned every 5 minutes.
 - **Photos (v3.3.0):** the library also lists photos (.jpg .jpeg .png .gif .webp .bmp) with a thumbnail and Photo Info (size, format, bit depth, location); the 影片 / 圖片 / 全部 toggle on the filter row picks what is shown (remembered per browser, `?kind=` in the URL). The photo page has a large image, ‹ › (or ←/→) to the neighbors in the same folder, regenerate thumbnail, and delete, which continues with the next photo. Photos are not grouped as versions. (v3.3.3) On phones you swipe left or right to switch photos, and the neighbors are preloaded so the next photo opens at once.
 - **Download history (v3.3.0):** the 📜 下載紀錄 button opens a page listing every download, existing and deleted, with search and status / type filters. Deleting a file keeps its record (and 標題 / 主演 / 系列 / 來源), so the startup scan and `/rescan` do not offer it again; a deleted row has ⬇ 重新下載, which queues it into its original folder. Re-download needs the bot running on that PC.

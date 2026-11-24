@@ -259,6 +259,78 @@ def mime_codecs(video: str, info: Optional[dict]) -> str:
     return f'{mime}; codecs="{codecs}"' if codecs else mime
 
 
+# ─── live transcode levels ───────────────────────────────────────────────────
+
+# (key, label, short side, max video kbps, audio kbps): the player's 畫質 menu, besides 原始
+STREAM_LEVELS = (
+    ('2160', '2160p', 2160, 16000, 160),
+    ('1080h', '1080p 高', 1080, 8000, 160),
+    ('1080l', '1080p 低', 1080, 4500, 128),
+    ('720h', '720p 高', 720, 4000, 128),
+    ('720l', '720p 低', 720, 2000, 128),
+    ('480h', '480p 高', 480, 1500, 96),
+    ('480l', '480p 低', 480, 800, 96),
+)
+STREAM_DEFAULT = '720h'
+_encoder: Optional[str] = None
+_encoder_lock = threading.Lock()
+
+
+def stream_level(key: str) -> tuple:
+    return next((l for l in STREAM_LEVELS if l[0] == key), None) or stream_level(STREAM_DEFAULT)
+
+
+def stream_qualities(info: Optional[dict]) -> List[dict]:
+    """Levels offered for a video: none above its resolution (the 480p ones always)."""
+    w, h = (info or {}).get('width') or 0, (info or {}).get('height') or 0
+    short, long_ = min(w, h), max(w, h)
+    return [{'key': key, 'label': label, 'kbps': video + audio}
+            for key, label, side, video, audio in STREAM_LEVELS
+            if side == 480 or not short or short >= side * 0.9 or long_ >= side * 16 / 9 * 0.9]
+
+
+def stream_encoder() -> str:
+    """'nvenc' when an NVIDIA GPU can encode H.264 here, else 'cpu' (tested once; blocking).
+    STREAM_ENCODER=cpu in .env forces the CPU."""
+    global _encoder
+    with _encoder_lock:
+        if _encoder is None:
+            _encoder = 'cpu'
+            ffmpeg = find_tool('ffmpeg')
+            if ffmpeg and os.environ.get('STREAM_ENCODER', '').strip().lower() != 'cpu':
+                try:
+                    test = subprocess.run(
+                        [ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+                         'color=c=black:s=256x256:d=0.2', '-c:v', 'h264_nvenc', '-f', 'null', '-'],
+                        capture_output=True, timeout=30, creationflags=_NO_WINDOW)
+                    if test.returncode == 0:
+                        _encoder = 'nvenc'
+                except Exception:
+                    pass
+            logger.info(f"影片庫即時轉檔編碼器：{'NVIDIA NVENC (GPU)' if _encoder == 'nvenc' else 'libx264 (CPU)'}")
+        return _encoder
+
+
+def stream_command(ffmpeg: str, path: str, start: float, key: str, encoder: str) -> List[str]:
+    """ffmpeg arguments for a fragmented H.264/AAC MP4 of `path` from `start` s at level `key`:
+    fits a 16:9 box of the level (portrait: turned), never upscales, video capped at the level's bit rate."""
+    _, _, side, video, audio = stream_level(key)
+    box = (side * 16 // 9 + 1) // 2 * 2                          # 2160 -> 3840, 720 -> 1280, 480 -> 854
+    scale = (f"scale=w='if(gte(iw,ih),min({box},iw),min({side},iw))':h='if(gte(iw,ih),min({side},ih),min({box},ih))'"
+             f":force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p")
+    rate = ['-maxrate', f'{video}k', '-bufsize', f'{video * 2}k']
+    if encoder == 'nvenc':
+        codec = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '23',
+                 '-b:v', f'{video * 3 // 4}k', *rate, '-profile:v', 'high']
+    else:
+        codec = ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '23', *rate]
+    return [ffmpeg, '-hide_banner', '-loglevel', 'error',
+            *(['-hwaccel', 'cuda'] if encoder == 'nvenc' else []),
+            '-ss', f'{start:.3f}', '-i', path, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
+            '-vf', scale, *codec, '-g', '48', '-c:a', 'aac', '-b:a', f'{audio}k', '-ac', '2',
+            '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1']
+
+
 # ─── screenshots ─────────────────────────────────────────────────────────────
 
 def make_screenshots(video: str, duration: float, count: int = SHOT_COUNT) -> List[str]:
