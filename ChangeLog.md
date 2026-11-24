@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.3.5] - 2026-11-23 - Drag-select
+### Added
+- Web library drag-select (mouse): drag on empty space draws a box and selects every item it touches; no key replaces the selection, Shift adds, Ctrl/⌘ toggles; the page scrolls near the top / bottom edge; a click on empty space clears the selection (`Library.jsx`)
+### Changed
+- Shift / Ctrl clicks follow Windows Explorer: Shift+click selects only the range from the anchor (the last clicked item) instead of adding it, Ctrl+Shift+click adds the range, Ctrl+click toggles and moves the anchor; Shift+click no longer selects page text (`Library.jsx` `select()`, `VideoCard.jsx`)
+
 ## [3.3.4] - 2026-11-23 - Multi-select Delete & Edit
 ### Added
 - Web library multi-select: `☑ 選取` button on the filter row, click / Shift+click range / Ctrl(⌘)+click to select videos and photos; bottom action bar with 全選, 清除選取, 🏷 編輯主演 / 系列, 🗑 刪除, 完成 (keys: Esc, Ctrl/⌘+A, Delete); dragging a selected item to a folder moves all selected items (`Library.jsx`, `VideoCard.jsx`)

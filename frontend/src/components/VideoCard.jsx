@@ -3,10 +3,13 @@ import { dimensions, fmtBitrate, fmtDuration, fmtSize, resolutionLabel, setDragI
 
 // shared by the card and list views: drag to a folder to move (all selected items when this one is
 // selected), right-click for rename / delete; in select mode a click toggles the item, Ctrl/⌘/Shift-click
-// always selects
+// always selects (Shift = range, see Library.jsx select())
 function itemProps(video, { onMenu, selecting, onSelect, dragIds }) {
   return {
+    'data-id': video.id, // found by drag-select (Library.jsx)
     draggable: true,
+    // Shift+click must not select page text
+    onMouseDown: (e) => onSelect && e.shiftKey && e.preventDefault(),
     onDragStart: (e) => setDragItems(e, { videos: dragIds?.length ? dragIds : [video.id], folders: [] }),
     onContextMenu: (e) => {
       e.preventDefault()

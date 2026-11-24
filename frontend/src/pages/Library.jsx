@@ -239,25 +239,25 @@ export default function Library({ guard, onLogout }) {
 
   // ── multi-select ──
 
-  function select(video, e) {
+  // like Windows Explorer: click / Ctrl+click toggles the item and makes it the anchor; Shift+click selects
+  // anchor..item (and only that); Ctrl+Shift+click adds anchor..item to the selection; the anchor stays
+  function select(video, e = {}) {
     setSelecting(true)
-    const range = e?.shiftKey && anchor.current
+    const ids = shown.map((v) => v.id)
+    const a = anchor.current ? ids.indexOf(anchor.current) : -1
+    const b = ids.indexOf(video.id)
+    if (e.shiftKey && a >= 0 && b >= 0) {
+      const range = ids.slice(Math.min(a, b), Math.max(a, b) + 1)
+      setSelected((prev) => (e.ctrlKey || e.metaKey ? new Set([...prev, ...range]) : new Set(range)))
+      return
+    }
     setSelected((prev) => {
       const next = new Set(prev)
-      if (range) {
-        const ids = shown.map((v) => v.id)
-        const a = ids.indexOf(anchor.current)
-        const b = ids.indexOf(video.id)
-        if (a >= 0 && b >= 0) {
-          for (const id of ids.slice(Math.min(a, b), Math.max(a, b) + 1)) next.add(id)
-          return next
-        }
-      }
       if (next.has(video.id)) next.delete(video.id)
       else next.add(video.id)
       return next
     })
-    if (!range) anchor.current = video.id
+    anchor.current = video.id
   }
 
   function exitSelect() {
@@ -376,6 +376,102 @@ export default function Library({ guard, onLogout }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [selecting, shown, picked, dialog, bulk, menu])
 
+  // ── drag-select (mouse only; on touch screens a drag scrolls): press on empty space and drag a box,
+  // every item it touches is selected. No key: replaces the selection · Shift: adds · Ctrl/⌘: toggles.
+  // A plain click on empty space clears the selection. Near the top / bottom edge the page scrolls.
+  const marquee = useRef(null) // { x0, y0 (page), x, y (client), mode, base, active, rects, hitKey }
+  const boxEl = useRef(null) // the box, drawn by changing its style (no re-render while dragging)
+
+  function onPointerDown(e) {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    if (e.target.closest('header, a, button, input, select, textarea, label, [data-id]')) return
+    e.preventDefault() // no text selection while dragging
+    document.activeElement?.blur?.()
+    marquee.current = {
+      x0: e.clientX + window.scrollX,
+      y0: e.clientY + window.scrollY,
+      x: e.clientX,
+      y: e.clientY,
+      mode: e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'add' : 'replace',
+      base: selected,
+      active: false,
+      hitKey: null,
+    }
+  }
+
+  useEffect(() => {
+    let raf = 0
+    function update() {
+      const m = marquee.current
+      if (!m) return
+      const px = m.x + window.scrollX
+      const py = m.y + window.scrollY
+      if (!m.active) {
+        if (Math.hypot(px - m.x0, py - m.y0) < 6) return
+        m.active = true
+        // item positions in page coordinates, read once (they don't move while the page scrolls)
+        m.rects = [...document.querySelectorAll('[data-select-root] [data-id]')].map((el) => {
+          const r = el.getBoundingClientRect()
+          return { id: el.dataset.id, l: r.left + window.scrollX, t: r.top + window.scrollY, r: r.right + window.scrollX, b: r.bottom + window.scrollY }
+        })
+        setSelecting(true)
+        raf = requestAnimationFrame(tick)
+      }
+      const l = Math.min(m.x0, px)
+      const r = Math.max(m.x0, px)
+      const t = Math.min(m.y0, py)
+      const b = Math.max(m.y0, py)
+      const box = boxEl.current
+      if (box) {
+        Object.assign(box.style, { display: 'block', left: `${l - window.scrollX}px`, top: `${t - window.scrollY}px`, width: `${r - l}px`, height: `${b - t}px` })
+      }
+      const hits = m.rects.filter((x) => x.l < r && x.r > l && x.t < b && x.b > t).map((x) => x.id)
+      const key = hits.join()
+      if (key === m.hitKey) return
+      m.hitKey = key
+      const next = m.mode === 'replace' ? new Set() : new Set(m.base)
+      for (const id of hits) {
+        if (m.mode === 'toggle' && m.base.has(id)) next.delete(id)
+        else next.add(id)
+      }
+      setSelected(next)
+      if (hits.length) anchor.current = hits[0]
+    }
+    function tick() {
+      const m = marquee.current
+      if (!m) return
+      const edge = 60
+      const dy = m.y < edge ? -(edge - m.y) / 3 : m.y > window.innerHeight - edge ? (m.y - window.innerHeight + edge) / 3 : 0
+      if (dy) window.scrollBy(0, dy)
+      update() // also follows wheel scrolling
+      raf = requestAnimationFrame(tick)
+    }
+    function onMove(e) {
+      const m = marquee.current
+      if (!m) return
+      m.x = e.clientX
+      m.y = e.clientY
+      update()
+    }
+    function onUp() {
+      const m = marquee.current
+      if (!m) return
+      marquee.current = null
+      cancelAnimationFrame(raf)
+      if (boxEl.current) boxEl.current.style.display = 'none'
+      if (!m.active && m.mode === 'replace') setSelected((prev) => (prev.size ? new Set() : prev))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
+
   const itemProps = (v) => ({
     video: v,
     search: params.toString(),
@@ -421,7 +517,7 @@ export default function Library({ guard, onLogout }) {
         </div>
       )}
 
-      <main className={`min-w-0 flex-1 px-4 ${selecting ? 'pb-36' : 'pb-16'}`}>
+      <main className={`min-w-0 flex-1 px-4 ${selecting ? 'pb-36 select-none' : 'pb-16'}`} onPointerDown={onPointerDown}>
         <header className="sticky top-0 z-10 -mx-4 mb-4 space-y-3 bg-neutral-950/90 px-4 py-3 backdrop-blur">
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebar(true)} className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm lg:hidden" aria-label="資料夾">
@@ -525,13 +621,13 @@ export default function Library({ guard, onLogout }) {
             {videos.length ? `沒有符合的${kind === 'all' ? '項目' : K.label}` : `下載資料夾中還沒有${kind === 'all' ? '影片或圖片' : K.label}`}
           </p>
         ) : view === 'grid' ? (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+          <div data-select-root className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
             {shown.map((v) => (
               <VideoCard key={v.id} {...itemProps(v)} />
             ))}
           </div>
         ) : (
-          <div>
+          <div data-select-root>
             <div className="hidden grid-cols-[96px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_88px_64px_80px] gap-3 border-b border-white/5 px-2 pb-2 text-xs text-neutral-500 md:grid">
               <span />
               <span>標題 / 檔案</span>
@@ -583,7 +679,7 @@ export default function Library({ guard, onLogout }) {
             </div>
           </div>
           <p className="mt-1 hidden text-xs text-neutral-500 md:block">
-            點選切換 · Shift + 點選選取範圍 · Ctrl + A 全選 · Delete 刪除 · Esc 結束 · 拖曳已選的項目到左側資料夾可一起移動
+            點選切換 · 在空白處拖曳框選（Shift 加入、Ctrl 切換）· Shift + 點選選取範圍（Ctrl + Shift 加入）· Ctrl + A 全選 · Delete 刪除 · Esc 結束 · 拖曳已選的項目到左側資料夾可一起移動
           </p>
         </div>
       )}
@@ -596,6 +692,7 @@ export default function Library({ guard, onLogout }) {
           onCancel={() => setBulk(false)}
         />
       )}
+      <div ref={boxEl} aria-hidden className="pointer-events-none fixed z-40 hidden rounded-sm border border-accent bg-accent/15" />
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {dialog && <PromptDialog {...dialog} onCancel={() => setDialog(null)} />}
       {toast && (

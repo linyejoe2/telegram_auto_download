@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.3.4
+# Telegram Auto Download Bot v3.3.5
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, download-record tracking, and real-time progress.
 
@@ -46,7 +46,7 @@ A high-performance Telegram bot that automatically downloads and backs up media 
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.3.4.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.3.5.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -203,7 +203,7 @@ A browser app (v3.0.0) for watching and managing the videos in your downloads fo
 - **Photos (v3.3.0):** the library also lists photos (.jpg .jpeg .png .gif .webp .bmp) with a thumbnail and Photo Info (size, format, bit depth, location); the 影片 / 圖片 / 全部 toggle on the filter row picks what is shown (remembered per browser, `?kind=` in the URL). The photo page has a large image, ‹ › (or ←/→) to the neighbors in the same folder, regenerate thumbnail, and delete, which continues with the next photo. Photos are not grouped as versions. (v3.3.3) On phones you swipe left or right to switch photos, and the neighbors are preloaded so the next photo opens at once.
 - **Download history (v3.3.0):** the 📜 下載紀錄 button opens a page listing every download, existing and deleted, with search and status / type filters. Deleting a file keeps its record (and 標題 / 主演 / 系列 / 來源), so the startup scan and `/rescan` do not offer it again; a deleted row has ⬇ 重新下載, which queues it into its original folder. Re-download needs the bot running on that PC.
 - **Re-download broken files (v3.3.1):** a video or photo that is incomplete or damaged shows a red box on its page with how its source will be found (its own record, a deleted record with the same file name, or the Telegram message id in the file name) and a ⬇ 重新下載 button; the broken copy is replaced once the source is found. Needs the bot running on that PC.
-- **Multi-select delete & edit (v3.3.4):** `☑ 選取` on the filter row turns on select mode: click toggles an item, Shift+click selects a range, Ctrl/⌘+click selects even outside select mode. The bottom bar offers 全選, 🏷 編輯主演 / 系列 (add 主演 to all, remove an existing 主演, keep / set / clear 系列) and 🗑 刪除 (confirmation, deleted items stay in 下載紀錄); Esc ends, Ctrl/⌘+A selects all shown, Delete deletes; dragging a selected item to a folder moves them all, and right-click on a selected item gives the same actions.
+- **Multi-select delete & edit (v3.3.4):** `☑ 選取` on the filter row turns on select mode: click toggles an item, Shift+click selects a range, Ctrl/⌘+click selects even outside select mode. The bottom bar offers 全選, 🏷 編輯主演 / 系列 (add 主演 to all, remove an existing 主演, keep / set / clear 系列) and 🗑 刪除 (confirmation, deleted items stay in 下載紀錄); Esc ends, Ctrl/⌘+A selects all shown, Delete deletes; dragging a selected item to a folder moves them all, and right-click on a selected item gives the same actions. (v3.3.5) With a mouse, drag on empty space to draw a selection box (Shift adds, Ctrl toggles; the page scrolls at the top / bottom edge), and Shift / Ctrl clicks work like Windows Explorer: Shift+click selects the range from the last clicked item, Ctrl+Shift+click adds it; a click on empty space clears the selection.
 - **Open from another PC (v3.2.0):** the download records (stored beside each file, with deleted ones and folder history in `<downloads>/.tad/`, v3.3.0; an old `downloads.db` is imported once and renamed `downloads.db.migrated`) and paths relative to the downloads folder let you open the folder from another PC like an Obsidian vault (shared drive or synced folder, any path or drive letter) and its history and library data come with it. `.env`, Telegram sessions, logs and the web password stay per PC. Run the bot on only one PC at a time (one bot token); the web library can run on several.
 - **Requirements:** ffmpeg and ffprobe in PATH or `FFMPEG_PATH` (not bundled). Building from source needs `cd frontend && npm install && npm run build` (Node.js 18+).
 
