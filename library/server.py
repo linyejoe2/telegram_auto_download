@@ -117,6 +117,7 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/move', self.move)
         r.add_post(PREFIX + '/api/batch/update', self.batch_update)
         r.add_post(PREFIX + '/api/batch/delete', self.batch_delete)
+        r.add_post(PREFIX + '/api/batch/compare', self.batch_compare)
         r.add_post(PREFIX + '/api/batch/merge', self.batch_merge)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
         r.add_get(PREFIX + '/api/history', self.history)
@@ -335,13 +336,22 @@ class LibraryServer:
         result, error = await self._run(self.library.delete_many, ids)
         return error or web.json_response(result)
 
-    async def batch_merge(self, request: web.Request):
-        """Multi-select 「嘗試合併」: {ids} -> {groups, already, unmatched, photos, threshold}."""
+    async def batch_compare(self, request: web.Request):
+        """Multi-select 「嘗試合併」 step 1 (changes nothing): {ids} -> {items, pairs: [[id, id, score]], photos, threshold}."""
         body = await self._body(request)
         ids = self._strings(body.get('ids'))
         if len(ids) < 2:
             return web.json_response({'error': '請至少選取兩部影片'}, status=400)
-        result, error = await self._run(self.library.merge_many, ids)
+        result, error = await self._run(self.library.compare_many, ids)
+        return error or web.json_response(result)
+
+    async def batch_merge(self, request: web.Request):
+        """Multi-select 「嘗試合併」 step 2: {groups: [[id, ...], ...]} -> {groups: [{title, versions}]}."""
+        body = await self._body(request)
+        groups = [g for g in (self._strings(g) for g in body.get('groups') or [] if isinstance(g, list)) if len(g) > 1]
+        if not groups:
+            return web.json_response({'error': '沒有要合併的影片'}, status=400)
+        result, error = await self._run(self.library.join_groups, groups)
         return error or web.json_response(result)
 
     async def rescan(self, request: web.Request):

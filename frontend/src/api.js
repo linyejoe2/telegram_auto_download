@@ -44,7 +44,8 @@ export const api = {
   // multi-select: { add_actors, remove_actors, series? } ('' clears 系列, leave it out to keep it)
   batchUpdate: (ids, changes) => request('POST', `${API}/batch/update`, { ids, ...changes }),
   batchDelete: (ids) => request('POST', `${API}/batch/delete`, { ids }),
-  batchMerge: (ids) => request('POST', `${API}/batch/merge`, { ids }),
+  batchCompare: (ids) => request('POST', `${API}/batch/compare`, { ids }),
+  batchMerge: (groups) => request('POST', `${API}/batch/merge`, { groups }),
 }
 
 // drag & drop payload between video items and folder tree nodes

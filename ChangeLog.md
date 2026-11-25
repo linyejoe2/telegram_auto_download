@@ -1,5 +1,9 @@
 # ChangeLog
 
+## [3.4.7] - 2026-11-25 - Merge Threshold Slider
+### Changed
+- 🔗 嘗試合併 no longer merges at once: it compares first (`Library.compare_many()` replaces `merge_many()`, `POST /library/api/batch/compare`) and the new `MergeDialog` (replaces `MergeResultDialog`) has a 相似度門檻 slider (40–99 %, 回到預設) that regroups live and shows 「將合併成 N 部片（共 M 部影片）」, groups and 不合併 / 無法比對 lists sorted by similarity; 確定合併 sends the shown groups (`Library.join_groups()`, `POST /library/api/batch/merge` now takes `{groups}`), 取消 merges nothing; the slider applies to this merge only (`store.py`, `server.py`, `api.js`, `Dialogs.jsx`, `Library.jsx`)
+
 ## [3.4.6] - 2026-11-25 - Similarity Fix for Chinese Paths
 ### Fixed
 - Videos in folders or with file names containing Chinese (non-ASCII) characters never got a similarity signature on Windows (`cv2.imread` can't open such paths), so automatic grouping never compared them and 🔗 嘗試合併 said 「還沒有截圖或影片資訊」; screenshots are now read with `np.fromfile` + `cv2.imdecode` (`library/similarity.py` `build_signature()`). The next startup full check compares these videos for the first time, so it may group some automatically and take longer once

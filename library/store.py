@@ -556,11 +556,11 @@ class Library:
         logger.info(f"影片庫：相似影片全面檢查完成（比對 {pairs} 組）")
         return pairs
 
-    def merge_many(self, vids: List[str]) -> dict:
-        """Multi-select 「嘗試合併」: compare the selected videos with the same check as the automatic
-        grouping (lengths within ±3 s, screenshot similarity >= threshold) and group the ones that match
-        (a match of a match joins too). Pairs split by hand before (not_same) are compared as well, since
-        the user asked; files merged this way lose that mark for each other."""
+    def compare_many(self, vids: List[str]) -> dict:
+        """Multi-select 「嘗試合併」, step 1 (nothing changes): the similarity of every pair of the selected
+        videos that the automatic grouping would compare (lengths within ±3 s). The page groups them at
+        the threshold the user picks and sends the groups back to join_groups(). Pairs split by hand
+        before (not_same) are compared as well, since the user asked."""
         with self._lock:
             items, photos = [], 0
             for vid in dict.fromkeys(str(v) for v in vids or []):
@@ -571,51 +571,40 @@ class Library:
                     items.append((vid, entry))
                 else:
                     photos += 1
-        ready = [(vid, e) for vid, e in items if self._signature(e) is not None]
-        parent = {vid: vid for vid, _ in ready}
-
-        def root(v):
-            while parent[v] != v:
-                parent[v] = parent[parent[v]]
-                v = parent[v]
-            return v
-
-        best = {}                     # vid -> best score with any other selected video of similar length
-        edges = []                    # (vid, vid, score) at or above the threshold
+        out, ready = [], []
+        for vid, e in items:
+            meta = e['meta']
+            if self._signature(e) is not None:
+                status = 'ok'
+                ready.append((vid, e))
+            else:      # not processed yet, or its screenshots can't be read
+                status = 'unreadable' if meta.get('shots') and meta.get('info') else 'not_ready'
+            out.append({'id': vid, 'name': os.path.basename(e['rel']), 'title': meta.get('title') or '',
+                        'group': meta.get('group') or '', 'status': status})
+        pairs = []
         for i, (va, a) in enumerate(ready):
             for vb, b in ready[i + 1:]:
                 gid = a['meta'].get('group')
                 if gid and gid == b['meta'].get('group'):      # already versions of each other
-                    parent[root(va)] = root(vb)
                     continue
                 da = (a['meta'].get('info') or {}).get('duration') or 0
                 db = (b['meta'].get('info') or {}).get('duration') or 0
                 if not (da > 0 and db > 0 and abs(da - db) <= similarity.DURATION_TOLERANCE):
                     continue
                 score = self._score(a, b)
-                if score is None:
-                    continue
-                for v in (va, vb):
-                    best[v] = max(best.get(v, 0), score)
-                if score >= self.threshold:
-                    edges.append((va, vb, score))
-                    parent[root(va)] = root(vb)
+                if score is not None:
+                    pairs.append([va, vb, round(score, 1)])
+        return {'items': out, 'pairs': pairs, 'photos': photos, 'threshold': self.threshold}
 
-        components = {}
-        for vid, _ in ready:
-            components.setdefault(root(vid), []).append(vid)
-        groups, already, unmatched = [], 0, []
-        for members in components.values():
-            scores = [s for a, b, s in edges if a in members and b in members]
-            if len(members) > 1 and not scores:
-                already += 1
-                continue
-            if len(members) == 1:
-                vid = members[0]
-                e = self.entries.get(vid)
-                unmatched.append({'name': os.path.basename(e['rel']) if e else vid,
-                                  'reason': 'low' if vid in best else 'length',
-                                  'best': round(best[vid]) if vid in best else None})
+    def join_groups(self, groups: List[List[str]]) -> dict:
+        """Multi-select 「嘗試合併」, step 2: put each list of videos (and their current groups) into one group.
+        Files merged this way lose their not_same mark for each other."""
+        done = []
+        for ids in groups or []:
+            with self._lock:
+                members = [v for v in dict.fromkeys(str(i) for i in ids)
+                           if v in self.entries and self.entries[v]['kind'] == 'video']
+            if len(members) < 2:
                 continue
             self._join(members)
             with self._lock:
@@ -629,17 +618,9 @@ class Library:
                         m['meta']['not_same'] = kept
                         self._save(m)
                 title = group[0][1]['meta'].get('title') if group else ''
-                files = [os.path.basename(self.entries[v]['rel']) for v in members if v in self.entries]
-            logger.info(f"影片庫：手動合併 {len(members)} 部（相似度 {min(scores):.0f}%–{max(scores):.0f}%）為「{title}」")
-            groups.append({'title': title, 'files': files, 'versions': len(group),
-                           'min': round(min(scores)), 'max': round(max(scores))})
-        for vid, e in items:
-            if vid not in parent:      # no signature: not processed yet, or its screenshots can't be read
-                ready_meta = e['meta'].get('shots') and e['meta'].get('info')
-                unmatched.append({'name': os.path.basename(e['rel']), 'reason': 'unreadable' if ready_meta else 'not_ready',
-                                  'best': None})
-        return {'groups': groups, 'already': already, 'unmatched': unmatched, 'photos': photos,
-                'threshold': self.threshold}
+            logger.info(f"影片庫：手動合併 {len(members)} 部為「{title}」（共 {len(group)} 個版本）")
+            done.append({'title': title, 'versions': len(group)})
+        return {'groups': done}
 
     def ungroup(self, vid: str) -> Optional[dict]:
         """Split this file out of its group; it will never be grouped with those files again."""

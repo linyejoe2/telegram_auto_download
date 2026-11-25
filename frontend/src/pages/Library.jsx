@@ -4,7 +4,7 @@ import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, saveList, sto
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
 import AppMenu from '../components/AppMenu.jsx'
-import { BulkEditDialog, ContextMenu, MergeResultDialog, PromptDialog } from '../components/Dialogs.jsx'
+import { BulkEditDialog, ContextMenu, MergeDialog, PromptDialog } from '../components/Dialogs.jsx'
 
 const SORTS = {
   added: { label: '最新加入', fn: (a, b) => (b.added || 0) - (a.added || 0) },
@@ -64,8 +64,8 @@ export default function Library({ guard, onLogout }) {
   const [selecting, setSelecting] = useState(false) // multi-select mode
   const [selected, setSelected] = useState(() => new Set()) // ids
   const [bulk, setBulk] = useState(false) // BulkEditDialog open
-  const [merged, setMerged] = useState(null) // result of 嘗試合併 (MergeResultDialog)
-  const [merging, setMerging] = useState(false)
+  const [comparison, setComparison] = useState(null) // 嘗試合併: similarities of the selected videos (MergeDialog)
+  const [merging, setMerging] = useState(false) // comparing
   const anchor = useRef(null) // last clicked item, start of a Shift-click range
   const toastTimer = useRef(null)
   const [params, setParams] = useSearchParams() // filters live in the URL so "back" keeps them
@@ -292,14 +292,30 @@ export default function Library({ guard, onLogout }) {
     } else notify(`已刪除 ${result.deleted} 個項目`)
   }
 
-  // 嘗試合併: group the selected videos that the similarity check finds to be the same video
+  // 嘗試合併: compare the selected videos (nothing changes yet); MergeDialog picks the threshold and confirms
   async function mergeSelected() {
     const ids = picked.filter((v) => v.kind !== 'photo').map((v) => v.id)
     if (ids.length < 2 || merging) return
     setMerging(true)
-    const result = await act(() => api.batchMerge(ids))
-    setMerging(false)
-    if (result) setMerged(result)
+    try {
+      setComparison(await api.batchCompare(ids))
+    } catch (e) {
+      try {
+        guard(e)
+      } catch (err) {
+        notify(err.message, true)
+      }
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  async function confirmMerge(groups) {
+    const result = await api.batchMerge(groups) // errors stay in the dialog
+    setComparison(null)
+    const versions = result.groups.reduce((n, g) => n + g.versions, 0)
+    notify(`已合併成 ${result.groups.length} 部片（共 ${versions} 個版本）`)
+    await load()
   }
 
   async function bulkUpdate(changes) {
@@ -713,7 +729,7 @@ export default function Library({ guard, onLogout }) {
           onCancel={() => setBulk(false)}
         />
       )}
-      {merged && <MergeResultDialog result={merged} onClose={() => setMerged(null)} />}
+      {comparison && <MergeDialog data={comparison} onConfirm={confirmMerge} onCancel={() => setComparison(null)} />}
       <div ref={boxEl} aria-hidden className="pointer-events-none fixed z-40 hidden rounded-sm border border-accent bg-accent/15" />
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {dialog && <PromptDialog {...dialog} onCancel={() => setDialog(null)} />}

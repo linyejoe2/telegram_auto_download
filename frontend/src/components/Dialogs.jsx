@@ -187,73 +187,202 @@ export function BulkEditDialog({ items, actorSuggestions = [], seriesSuggestions
   )
 }
 
-// Result of the multi-select 「嘗試合併」: the groups made and why the other videos stayed apart.
-const UNMATCHED = {
-  low: (u, t) => `最相似只有 ${u.best}%（門檻 ${t}%）`,
-  length: () => '沒有長度相近（±3 秒）的其他選取影片',
-  not_ready: () => '還沒有截圖或影片資訊（處理中，稍後再試）',
-  unreadable: () => '截圖無法讀取（可在影片頁按「重新產生截圖」）',
+// Multi-select 「嘗試合併」: `data` is the comparison of the selected videos ({items, pairs: [[id, id, score]],
+// photos, threshold}, nothing merged yet). The slider sets this merge's similarity threshold and the
+// groups follow it at once (a match of a match joins too), highest similarity first; 確定合併 calls
+// onConfirm(groups as id lists), 取消 merges nothing.
+const MIN_THRESHOLD = 40
+const MAX_THRESHOLD = 99
+
+function groupAt(data, threshold) {
+  const ok = data.items.filter((i) => i.status === 'ok')
+  const parent = new Map(ok.map((i) => [i.id, i.id]))
+  const root = (v) => {
+    while (parent.get(v) !== v) {
+      parent.set(v, parent.get(parent.get(v)))
+      v = parent.get(v)
+    }
+    return v
+  }
+  const join = (a, b) => parent.set(root(a), root(b))
+  const firstOfGroup = {}
+  for (const i of ok) {
+    if (!i.group) continue
+    if (firstOfGroup[i.group]) join(i.id, firstOfGroup[i.group]) // already versions of each other
+    else firstOfGroup[i.group] = i.id
+  }
+  const best = new Map() // id -> best score with any selected video of similar length, any threshold
+  for (const [a, b, score] of data.pairs) {
+    best.set(a, Math.max(best.get(a) ?? 0, score))
+    best.set(b, Math.max(best.get(b) ?? 0, score))
+  }
+  const edges = data.pairs.filter((p) => p[2] >= threshold)
+  for (const [a, b] of edges) join(a, b)
+
+  const comps = new Map()
+  for (const i of ok) {
+    const r = root(i.id)
+    if (!comps.has(r)) comps.set(r, { items: [], scores: [] })
+    comps.get(r).items.push(i)
+  }
+  for (const [a, , score] of edges) comps.get(root(a)).scores.push(score)
+
+  const groups = []
+  const single = []
+  let already = 0
+  for (const c of comps.values()) {
+    if (c.items.length === 1) {
+      const i = c.items[0]
+      single.push({ ...i, best: best.has(i.id) ? best.get(i.id) : null })
+    } else if (!c.scores.length) already += 1
+    else groups.push({ items: c.items, ids: c.items.map((i) => i.id), min: Math.min(...c.scores), max: Math.max(...c.scores) })
+  }
+  groups.sort((a, b) => b.max - a.max || b.min - a.min) // highest similarity first
+  single.sort((a, b) => (b.best ?? -1) - (a.best ?? -1))
+  return { groups, single, already }
 }
 
-export function MergeResultDialog({ result, onClose }) {
-  const { groups, already, unmatched, photos, threshold } = result
+const pct = (n) => `${Math.round(n)}%`
+const range = (g) => (Math.round(g.min) === Math.round(g.max) ? pct(g.max) : `${pct(g.max)}–${pct(g.min)}`)
+
+export function MergeDialog({ data, onConfirm, onCancel }) {
+  const [threshold, setThreshold] = useState(data.threshold)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const { groups, single, already } = useMemo(() => groupAt(data, threshold), [data, threshold])
+  const failed = data.items.filter((i) => i.status !== 'ok')
+  const merging = groups.reduce((n, g) => n + g.items.length, 0)
+
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose()
+    const onKey = (e) => e.key === 'Escape' && !busy && onCancel()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
-  const range = (g) => (g.min === g.max ? `${g.min}%` : `${g.min}%–${g.max}%`)
+  }, [busy])
+
+  async function confirm() {
+    setBusy(true)
+    setError('')
+    try {
+      await onConfirm(groups.map((g) => g.ids))
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onMouseDown={() => !busy && onCancel()}>
       <div
         role="dialog"
-        aria-label="合併結果"
+        aria-label="嘗試合併"
         onMouseDown={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-xl bg-neutral-900 p-5 shadow-2xl ring-1 ring-white/10"
+        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl bg-neutral-900 shadow-2xl ring-1 ring-white/10"
       >
-        <h2 className="font-medium">{groups.length ? `已合併成 ${groups.length} 部片` : '沒有可以合併的影片'}</h2>
-        {groups.length > 0 && (
-          <section className="space-y-2">
-            {groups.map((g, i) => (
-              <div key={i} className="rounded-lg bg-neutral-800/70 px-3 py-2 text-sm ring-1 ring-white/10">
-                <div className="font-medium">
-                  {g.title} <span className="text-xs font-normal text-neutral-400">· {g.versions} 個版本 · 相似度 {range(g)}</span>
-                </div>
-                <ul className="mt-1 space-y-0.5 text-xs text-neutral-400">
-                  {g.files.map((f) => (
-                    <li key={f} className="truncate">{f}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </section>
-        )}
-        {unmatched.length > 0 && (
-          <section className="space-y-1.5">
-            <h3 className="text-sm text-neutral-400">沒有合併的 {unmatched.length} 部</h3>
-            <ul className="space-y-1 text-sm">
-              {unmatched.map((u, i) => (
-                <li key={i} className="min-w-0">
-                  <span className="block truncate">{u.name}</span>
-                  <span className="block text-xs text-neutral-500">{UNMATCHED[u.reason](u, threshold)}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {(already > 0 || photos > 0) && (
-          <p className="text-xs text-neutral-500">
-            {[already && `${already} 組本來就是同一部片的版本`, photos && `${photos} 張圖片不比對`].filter(Boolean).join('；')}
+        <div className="space-y-3 border-b border-white/10 p-5 pb-4">
+          <h2 className="font-medium">嘗試合併 {data.items.length} 部影片</h2>
+          <div>
+            <div className="flex items-baseline justify-between text-sm">
+              <label htmlFor="merge-threshold" className="text-neutral-300">
+                相似度門檻 <span className="font-medium tabular-nums text-white">{threshold}%</span>
+              </label>
+              {threshold !== data.threshold && (
+                <button onClick={() => setThreshold(data.threshold)} className="text-xs text-neutral-400 hover:text-white">
+                  回到預設 {data.threshold}%
+                </button>
+              )}
+            </div>
+            <input
+              id="merge-threshold"
+              type="range"
+              min={MIN_THRESHOLD}
+              max={MAX_THRESHOLD}
+              step={1}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="seek mt-2 w-full"
+            />
+            <div className="flex justify-between text-[11px] tabular-nums text-neutral-500">
+              <span>{MIN_THRESHOLD}%（寬鬆）</span>
+              <span>{MAX_THRESHOLD}%（嚴格）</span>
+            </div>
+          </div>
+          <p className="text-sm" aria-live="polite">
+            {groups.length ? (
+              <>將合併成 <b className="tabular-nums">{groups.length}</b> 部片（共 <span className="tabular-nums">{merging}</span> 部影片）</>
+            ) : (
+              <span className="text-neutral-400">這個門檻下沒有可以合併的影片</span>
+            )}
           </p>
-        )}
-        <p className="text-xs text-neutral-500">
-          用和自動歸類相同的方法比對：片長相差 3 秒內，截圖相似度達 {threshold}%（門檻在 Windows 程式的 Web Library 頁設定）。
-          合併錯了可以在影片頁按「從群組移出」。
-        </p>
-        <div className="flex justify-end">
-          <button onClick={onClose} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium hover:bg-accent-hover">
-            確定
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 py-4">
+          {groups.length > 0 && (
+            <section className="space-y-2">
+              {groups.map((g) => (
+                <div key={g.ids.join()} className="rounded-lg bg-neutral-800/70 px-3 py-2 text-sm ring-1 ring-white/10">
+                  <div className="text-xs text-neutral-400">
+                    相似度 <span className="font-medium tabular-nums text-emerald-300">{range(g)}</span> · {g.items.length} 部
+                  </div>
+                  <ul className="mt-1 space-y-0.5">
+                    {g.items.map((i) => (
+                      <li key={i.id} className="truncate" title={i.name}>{i.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </section>
+          )}
+          {single.length > 0 && (
+            <section className="space-y-1.5">
+              <h3 className="text-sm text-neutral-400">不合併的 {single.length} 部</h3>
+              <ul className="space-y-1 text-sm">
+                {single.map((i) => (
+                  <li key={i.id} className="flex min-w-0 items-baseline gap-2">
+                    <span className="min-w-0 flex-1 truncate" title={i.name}>{i.name}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-neutral-500">
+                      {i.best === null ? '沒有長度相近（±3 秒）的影片' : `最相似 ${pct(i.best)}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {failed.length > 0 && (
+            <section className="space-y-1.5">
+              <h3 className="text-sm text-neutral-400">無法比對的 {failed.length} 部</h3>
+              <ul className="space-y-1 text-sm">
+                {failed.map((i) => (
+                  <li key={i.id} className="min-w-0">
+                    <span className="block truncate" title={i.name}>{i.name}</span>
+                    <span className="block text-xs text-neutral-500">
+                      {i.status === 'unreadable' ? '截圖無法讀取（可在影片頁按「重新產生截圖」）' : '還沒有截圖或影片資訊（處理中，稍後再試）'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {(already > 0 || data.photos > 0) && (
+            <p className="text-xs text-neutral-500">
+              {[already && `${already} 組本來就是同一部片的版本`, data.photos && `${data.photos} 張圖片不比對`].filter(Boolean).join('；')}
+            </p>
+          )}
+          <p className="text-xs text-neutral-500">
+            用和自動歸類相同的方法比對：片長相差 3 秒內，比較截圖相似度。這裡調整的門檻只用在這次合併；自動歸類的門檻（預設 {data.threshold}%）在 Windows 程式的 Web Library 頁設定。合併錯了可以在影片頁按「從群組移出」。
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-white/10 p-4">
+          {error && <p className="mr-auto text-sm text-red-400">{error}</p>}
+          <button onClick={onCancel} disabled={busy} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50">
+            取消
+          </button>
+          <button
+            onClick={confirm}
+            disabled={busy || !groups.length}
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium hover:bg-accent-hover disabled:opacity-50"
+          >
+            {busy ? '合併中…' : groups.length ? `確定合併 ${groups.length} 部片` : '確定合併'}
           </button>
         </div>
       </div>
