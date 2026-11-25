@@ -136,8 +136,20 @@ class FaceModel:
     def __init__(self):
         import cv2
         self.cv2 = cv2
-        self.detector = cv2.FaceDetectorYN.create(model_path('detector'), '', (320, 320), DET_SCORE, 0.3, 50)
-        self.recognizer = cv2.FaceRecognizerSF.create(model_path('recognizer'), '')
+        paths = model_path('detector'), model_path('recognizer')
+        try:
+            self.detector = cv2.FaceDetectorYN.create(paths[0], '', (320, 320), DET_SCORE, 0.3, 50)
+            self.recognizer = cv2.FaceRecognizerSF.create(paths[1], '')
+        except (cv2.error, AttributeError) as e:
+            # a damaged download: remove it from the cache folder so the next try downloads it again
+            for p in paths:
+                if os.path.dirname(p) == _model_dirs()[-1] and _sha256(p) != next(
+                        sha for name, sha, _ in MODELS.values() if name == os.path.basename(p)):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            raise RuntimeError(f'人臉模型無法載入：{e}')
 
     def faces(self, image) -> List[dict]:
         h, w = image.shape[:2]
@@ -256,9 +268,17 @@ def _write_json(path: str, data):
     os.replace(tmp, path)
 
 
+_analyze_lock = threading.Lock()     # AI 辨識 jobs and the people database share the cache files
+
+
 def analyze(path: str, kind: str, duration: float, model_getter) -> dict:
     """Faces of one item, grouped into persons (cached in the shots folder for this file version).
     Returns {'persons': [{count, size, face, body, time}], 'feats': array (persons x 128), 'frames'}."""
+    with _analyze_lock:
+        return _analyze(path, kind, duration, model_getter)
+
+
+def _analyze(path: str, kind: str, duration: float, model_getter) -> dict:
     folder = media.shots_dir(path)
     mtime = os.path.getmtime(path)
     info_file, feat_file = os.path.join(folder, 'faces.json'), os.path.join(folder, 'faces.npy')

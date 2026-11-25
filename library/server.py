@@ -27,6 +27,7 @@ from aiohttp import web
 
 from . import media
 from .auth import Sessions, verify_password
+from .people import People
 from .recognize import AI_FILE_RE, Recognizer
 from .recognize import status as recognition_status
 from .store import Library, LibraryError, encode_id
@@ -86,6 +87,8 @@ class LibraryServer:
             self.library.threshold = similarity_threshold
         self.library.on_grouped = on_grouped
         self.recognizer = Recognizer(self.library)      # AI 辨識 queue (library/recognize.py)
+        self.people = People(self.library)              # 人物資料庫, auto 主演 tags (library/people.py)
+        self.library.on_change = self.people.wake
         # download a deleted file again through the running bot: returns an error text or None
         self.on_redownload = on_redownload
         self.sessions = Sessions(secret, password_hash)
@@ -131,6 +134,13 @@ class LibraryServer:
         r.add_delete(PREFIX + '/api/recognition/{job}', self.recognition_remove)
         r.add_post(PREFIX + '/api/recognition/{job}/cancel', self.recognition_cancel)
         r.add_post(PREFIX + '/api/recognition/{job}/apply', self.recognition_apply)
+        r.add_get(PREFIX + '/api/people', self.people_list)
+        r.add_post(PREFIX + '/api/people/scan', self.people_scan)
+        r.add_get(PREFIX + '/api/people/{pid}', self.people_detail)
+        r.add_delete(PREFIX + '/api/people/{pid}', self.people_delete)
+        r.add_post(PREFIX + '/api/people/{pid}/rename', self.people_rename)
+        r.add_post(PREFIX + '/api/people/{pid}/merge', self.people_merge)
+        r.add_post(PREFIX + '/api/people/{pid}/remove', self.people_remove)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
         r.add_get(PREFIX + '/api/history', self.history)
         r.add_post(PREFIX + '/api/history/redownload', self.redownload)
@@ -424,6 +434,46 @@ class LibraryServer:
             return web.json_response({'error': str(e)}, status=400)
         return web.json_response(result)
 
+    # ── 人物資料庫 (library/people.py) ──
+
+    async def _people_call(self, fn, *args):
+        try:
+            return web.json_response(await asyncio.get_running_loop().run_in_executor(None, fn, *args))
+        except KeyError:
+            return web.json_response({'error': '找不到這個人物'}, status=404)
+        except ValueError as e:
+            return web.json_response({'error': str(e)}, status=400)
+
+    async def people_list(self, request: web.Request):
+        """{people: [{id, name, label, num, count, auto, cover, faces}], status, scan_all, unscanned, items}."""
+        return await self._people_call(self.people.overview)
+
+    async def people_detail(self, request: web.Request):
+        data = await asyncio.get_running_loop().run_in_executor(None, self.people.detail, request.match_info['pid'])
+        return web.json_response(data) if data else web.json_response({'error': '找不到這個人物'}, status=404)
+
+    async def people_scan(self, request: web.Request):
+        """{on: true} recognises every item not scanned yet (in the background), {on: false} stops."""
+        body = await self._body(request)
+        return await self._people_call(self.people.set_scan_all, bool(body.get('on')))
+
+    async def people_rename(self, request: web.Request):
+        """{name}: name / rename (主演 tags follow); an existing name merges into that person."""
+        body = await self._body(request)
+        return await self._people_call(self.people.rename, request.match_info['pid'], body.get('name', ''))
+
+    async def people_merge(self, request: web.Request):
+        body = await self._body(request)
+        return await self._people_call(self.people.merge, request.match_info['pid'], str(body.get('into') or ''))
+
+    async def people_remove(self, request: web.Request):
+        """{items: [id]}: not this person (tag removed, never added again)."""
+        body = await self._body(request)
+        return await self._people_call(self.people.remove_items, request.match_info['pid'], self._strings(body.get('items')))
+
+    async def people_delete(self, request: web.Request):
+        return await self._people_call(self.people.delete, request.match_info['pid'])
+
     async def rescan(self, request: web.Request):
         count = await asyncio.get_running_loop().run_in_executor(None, self.library.scan)
         return web.json_response({'videos': count, 'processing': self.library.processing})
@@ -566,6 +616,7 @@ class LibraryServer:
         logger.info(f"網頁影片庫已啟動：http://{self.host}:{self.port}{PREFIX}/")
         self._rescan_task = asyncio.create_task(self._rescan_loop())
         self.recognizer.start()             # continues jobs left in .tad/recognition.json
+        self.people.start()                 # builds / updates the people database, recognises new items
 
     async def _rescan_loop(self):
         loop = asyncio.get_running_loop()
@@ -590,6 +641,7 @@ class LibraryServer:
             await self._runner.cleanup()
             self._runner = None
         self.recognizer.shutdown()
+        self.people.shutdown()
         self.library.shutdown()
         logger.info("網頁影片庫已停止")
 

@@ -56,6 +56,14 @@ export const api = {
   removeRecognition: (id) => request('DELETE', `${API}/recognition/${id}`),
   // entries: [{ key, action: 'apply' | 'reject', name?, items? }]
   applyRecognition: (id, entries) => request('POST', `${API}/recognition/${id}/apply`, { entries }),
+  // 人物資料庫 (library/people.py); renaming / merging / deleting changes the 主演 tags on the items
+  people: () => request('GET', `${API}/people`),
+  person: (id) => request('GET', `${API}/people/${id}`),
+  peopleScan: (on) => request('POST', `${API}/people/scan`, { on }),
+  renamePerson: (id, name) => request('POST', `${API}/people/${id}/rename`, { name }),
+  mergePerson: (id, into) => request('POST', `${API}/people/${id}/merge`, { into }),
+  removeFromPerson: (id, items) => request('POST', `${API}/people/${id}/remove`, { items }),
+  deletePerson: (id) => request('DELETE', `${API}/people/${id}`),
 }
 
 // drag & drop payload between video items and folder tree nodes

@@ -122,6 +122,7 @@ hiddenimports = [
     'library.similarity',
     'library.deep_compare',
     'library.recognize',
+    'library.people',
     'src.video_loader',
 
     # custom

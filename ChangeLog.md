@@ -1,5 +1,12 @@
 # ChangeLog
 
+## [3.6.0] - 2026-11-25 - People Database
+### Added
+- Web library 人物資料庫 behind the 主演 tags (`library/people.py` `People`, background thread): named people are built from the tags (the tagged item's matching face becomes a reference); new items are recognised once their screenshots are ready, a face matching a named person gets that 主演 tag automatically (`auto_actors`), unknown faces are collected as 未命名人物; existing items only after 「🔍 掃描全部未掃描的項目」; stored in `<downloads>/.tad/people.json` + `people.npy`
+- New 👥 人物 page `/people` and `/people/:id` in the ☰ menu (`People.jsx`, `AppMenu.jsx`, `App.jsx`, `api.js`, `/library/api/people*`): 已命名 / 未命名 tabs, search, 命名 / 改名 / 合併 / 刪除人物, 🎬 在媒體庫查看, 「不是這個人」 (never added again, `not_people`; a hand-removed auto tag is remembered too), scan status; tags stay in sync
+### Changed
+- `Library.on_change`, `set_fields()`, `replace_actor()` (`store.py`); `recognize.analyze()` is serialised by a lock; a damaged face model now raises 「人臉模型無法載入」 and is re-downloaded instead of skipping every item; `telegram_bot.spec` hiddenimport `library.people`
+
 ## [3.5.0] - 2026-11-25 - AI Recognition
 ### Added
 - Web library AI 辨識: select items, then 👤 辨識主演 (OpenCV YuNet + SFace face match against items already tagged, unknown faces clustered as 未知人物) or 👗 辨識系列 (same person + same outfit, outfits described and compared by an Ollama vision model) from the bottom bar or right-click menu; runs as a background queue (`library/recognize.py` `Recognizer`, `/library/api/recognition*`, `/library/media/{id}/ai/*.jpg`, `Library.jsx` `recognizeSelected()`)

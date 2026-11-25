@@ -92,6 +92,9 @@ class Library:
         self.on_grouped: Optional[Callable[[str], None]] = None   # e.g. a Telegram notice
         self.matching_ready = False              # set after the full check at startup
         self._sigs: Dict[str, tuple] = {}        # path -> (shots_mtime, signature)
+        # called (no arguments, any thread) when an item got its info / screenshots or its tags changed;
+        # the people database (library/people.py) wakes up on it
+        self.on_change: Optional[Callable[[], None]] = None
 
     # ── paths ──
 
@@ -224,6 +227,7 @@ class Library:
                 entry['error'] = None
             if self.matching_ready and kind == 'video':
                 self._match_new(vid)
+            self._changed()
         except Exception as e:
             logger.warning(f"影片資訊/截圖產生失敗 {vid}: {e}")
             with self._lock:
@@ -413,7 +417,45 @@ class Library:
                 if mid != vid:
                     m['meta'].update({k: meta[k] for k in ('title', 'actors', 'series') if k in meta})
                     self._save(m)
+        if 'actors' in fields:
+            self._changed()
         return True
+
+    def _changed(self):
+        if self.on_change:
+            try:
+                self.on_change()
+            except Exception as e:
+                logger.debug(f"on_change failed: {e}")
+
+    def set_fields(self, vid: str, fields: dict) -> bool:
+        """Store extra sidecar keys of an item (people database marks), nothing shared with versions."""
+        with self._lock:
+            entry = self.entries.get(vid)
+            if not entry:
+                return False
+            self._sync_meta(entry)
+            entry['meta'].update(fields)
+            self._save(entry)
+            return True
+
+    def replace_actor(self, old: str, new: str) -> int:
+        """Rename a 主演 on every item (the people page); '' removes it. Returns the number of items changed."""
+        old_l, new = old.strip().lower(), str(new or '').strip()[:100]
+        changed = 0
+        with self._lock:
+            for vid, entry in list(self.entries.items()):
+                actors = entry['meta'].get('actors') or []
+                if not any(a.lower() == old_l for a in actors):
+                    continue
+                kept = [(new if a.lower() == old_l else a) for a in actors]
+                self._apply(vid, {'actors': [a for a in kept if a]})
+                auto = entry['meta'].get('auto_actors') or []
+                if any(a.lower() == old_l for a in auto):
+                    entry['meta']['auto_actors'] = [x for x in ((new if a.lower() == old_l else a) for a in auto) if x]
+                    self._save(entry)
+                changed += 1
+        return changed
 
     def delete(self, vid: str) -> bool:
         with self._lock:
