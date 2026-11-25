@@ -4,7 +4,7 @@ import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, saveList, sto
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
 import AppMenu from '../components/AppMenu.jsx'
-import { BulkEditDialog, ContextMenu, MergeDialog, PromptDialog } from '../components/Dialogs.jsx'
+import { BulkEditDialog, ContextMenu, DeepCompareDialog, MergeDialog, PromptDialog } from '../components/Dialogs.jsx'
 
 const SORTS = {
   added: { label: '最新加入', fn: (a, b) => (b.added || 0) - (a.added || 0) },
@@ -66,6 +66,7 @@ export default function Library({ guard, onLogout }) {
   const [bulk, setBulk] = useState(false) // BulkEditDialog open
   const [comparison, setComparison] = useState(null) // 嘗試合併: similarities of the selected videos (MergeDialog)
   const [merging, setMerging] = useState(false) // comparing
+  const [deepIds, setDeepIds] = useState(null) // 加強比對 of exactly two videos (DeepCompareDialog)
   const anchor = useRef(null) // last clicked item, start of a Shift-click range
   const toastTimer = useRef(null)
   const [params, setParams] = useSearchParams() // filters live in the URL so "back" keeps them
@@ -310,9 +311,16 @@ export default function Library({ guard, onLogout }) {
     }
   }
 
+  // 加強比對: only for exactly two selected videos, slow, so only by hand
+  function deepCompare() {
+    const ids = picked.filter((v) => v.kind !== 'photo').map((v) => v.id)
+    if (ids.length === 2) setDeepIds(ids)
+  }
+
   async function confirmMerge(groups) {
     const result = await api.batchMerge(groups) // errors stay in the dialog
     setComparison(null)
+    setDeepIds(null)
     const versions = result.groups.reduce((n, g) => n + g.versions, 0)
     notify(`已合併成 ${result.groups.length} 部片（共 ${versions} 個版本）`)
     await load()
@@ -333,6 +341,7 @@ export default function Library({ guard, onLogout }) {
         items: [
           { label: `🏷 編輯已選 ${picked.length} 個的主演 / 系列`, onClick: () => setBulk(true) },
           { label: '🔗 嘗試合併為同一部片', disabled: pickedVideos < 2 || merging, onClick: mergeSelected },
+          { label: '🔬 加強比對（只限兩部影片）', disabled: pickedVideos !== 2, onClick: deepCompare },
           { label: '✖ 取消選取', onClick: exitSelect },
           '-',
           { label: `🗑 刪除已選 ${picked.length} 個`, danger: true, onClick: () => deleteSelected() },
@@ -691,7 +700,7 @@ export default function Library({ guard, onLogout }) {
                 清除選取
               </button>
             )}
-            <div className="ml-auto flex gap-2">
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
               <button onClick={() => setBulk(true)} disabled={!picked.length} className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40">
                 🏷 編輯主演 / 系列
               </button>
@@ -702,6 +711,14 @@ export default function Library({ guard, onLogout }) {
                 title="用截圖相似度比對選取的影片，相似的合併為同一部片的不同版本"
               >
                 {merging ? '比對中…' : '🔗 嘗試合併'}
+              </button>
+              <button
+                onClick={deepCompare}
+                disabled={pickedVideos !== 2}
+                className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40"
+                title="只限選兩部影片：先對齊時間（掐頭去尾）和畫面（縮放、裁切、黑邊）再比較，比較慢但更準"
+              >
+                🔬 加強比對
               </button>
               <button
                 onClick={() => deleteSelected()}
@@ -730,6 +747,7 @@ export default function Library({ guard, onLogout }) {
         />
       )}
       {comparison && <MergeDialog data={comparison} onConfirm={confirmMerge} onCancel={() => setComparison(null)} />}
+      {deepIds && <DeepCompareDialog ids={deepIds} onMerge={confirmMerge} onClose={() => setDeepIds(null)} />}
       <div ref={boxEl} aria-hidden className="pointer-events-none fixed z-40 hidden rounded-sm border border-accent bg-accent/15" />
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {dialog && <PromptDialog {...dialog} onCancel={() => setDialog(null)} />}

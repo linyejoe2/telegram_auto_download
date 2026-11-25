@@ -596,6 +596,30 @@ class Library:
                     pairs.append([va, vb, round(score, 1)])
         return {'items': out, 'pairs': pairs, 'photos': photos, 'threshold': self.threshold}
 
+    def deep_compare(self, vid_a: str, vid_b: str) -> dict:
+        """加強比對 of two videos (by hand only, slow: decodes minutes of both, library/deep_compare.py).
+        The longer one is the reference `a`; `regular` is the normal screenshot similarity for comparison."""
+        from . import deep_compare
+        with self._lock:
+            pair = [(v, self.entries.get(v)) for v in (str(vid_a), str(vid_b))]
+        if pair[0][0] == pair[1][0] or any(e is None or e['kind'] != 'video' for _, e in pair):
+            raise LibraryError('請選取兩部不同的影片', 400)
+        duration = lambda e: (e['meta'].get('info') or {}).get('duration') or 0
+        if any(not duration(e) for _, e in pair):
+            raise LibraryError('影片資訊還沒產生完成，請稍後再試', 409)
+        pair.sort(key=lambda x: duration(x[1]), reverse=True)
+        (ia, a), (ib, b) = pair
+        try:
+            result = deep_compare.compare(a['path'], duration(a), b['path'], duration(b))
+        except RuntimeError as e:
+            raise LibraryError(str(e), 422)
+        regular = self._score(a, b)
+        gid = a['meta'].get('group')
+        side = lambda vid, e: {'id': vid, 'name': os.path.basename(e['rel']), 'duration': duration(e)}
+        return {**result, 'a': side(ia, a), 'b': side(ib, b), 'threshold': self.threshold,
+                'regular': round(regular) if regular is not None else None,
+                'same_group': bool(gid) and gid == b['meta'].get('group')}
+
     def join_groups(self, groups: List[List[str]]) -> dict:
         """Multi-select 「嘗試合併」, step 2: put each list of videos (and their current groups) into one group.
         Files merged this way lose their not_same mark for each other."""

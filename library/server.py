@@ -119,6 +119,7 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/batch/delete', self.batch_delete)
         r.add_post(PREFIX + '/api/batch/compare', self.batch_compare)
         r.add_post(PREFIX + '/api/batch/merge', self.batch_merge)
+        r.add_post(PREFIX + '/api/batch/deep-compare', self.deep_compare)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
         r.add_get(PREFIX + '/api/history', self.history)
         r.add_post(PREFIX + '/api/history/redownload', self.redownload)
@@ -343,6 +344,15 @@ class LibraryServer:
         if len(ids) < 2:
             return web.json_response({'error': '請至少選取兩部影片'}, status=400)
         result, error = await self._run(self.library.compare_many, ids)
+        return error or web.json_response(result)
+
+    async def deep_compare(self, request: web.Request):
+        """加強比對 of exactly two videos: {ids: [a, b]} -> score, offset, scale, previews… (takes seconds to minutes)."""
+        body = await self._body(request)
+        ids = self._strings(body.get('ids'))
+        if len(ids) != 2:
+            return web.json_response({'error': '加強比對只能選兩部影片'}, status=400)
+        result, error = await self._run(self.library.deep_compare, ids[0], ids[1])
         return error or web.json_response(result)
 
     async def batch_merge(self, request: web.Request):

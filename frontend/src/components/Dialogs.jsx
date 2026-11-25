@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { api, fmtDuration } from '../api.js'
 import TagInput from './TagInput.jsx'
 
 // Small modal asking for a name (rename / new folder). Resolves via onSubmit / onCancel.
@@ -384,6 +385,136 @@ export function MergeDialog({ data, onConfirm, onCancel }) {
           >
             {busy ? '合併中…' : groups.length ? `確定合併 ${groups.length} 部片` : '確定合併'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 加強比對 of exactly two videos (started by hand, never automatic): the server lines up the time (cut
+// start / end) and the picture (scaling, crop, black borders) before comparing, which takes a while.
+// onMerge([[a, b]]) puts them into one group.
+const secs = (s) => (Math.abs(s) < 60 ? `${Number(Math.abs(s).toFixed(1))} 秒` : fmtDuration(Math.abs(s)))
+
+export function DeepCompareDialog({ ids, onMerge, onClose }) {
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api.deepCompare(ids).then((r) => live && setResult(r)).catch((e) => live && setError(e.message))
+    return () => {
+      live = false // closing doesn't stop the server, the answer is just ignored
+    }
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && !busy && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy])
+
+  async function merge() {
+    setBusy(true)
+    try {
+      await onMerge([[result.a.id, result.b.id]])
+    } catch (e) {
+      setError(e.message)
+      setBusy(false)
+    }
+  }
+
+  let body
+  if (!result && !error) {
+    body = (
+      <div className="flex flex-col items-center gap-3 py-8 text-center text-sm text-neutral-400">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+        <p>加強比對中…</p>
+        <p className="text-xs text-neutral-500">會讀取兩部影片的前幾分鐘來對齊時間，再對齊畫面比較，通常需要 10 秒到 1 分鐘。</p>
+      </div>
+    )
+  } else if (!result) {
+    body = <p className="py-6 text-sm text-red-400">{error}</p>
+  } else {
+    const { a, b, score, threshold, offset, overlap, scale, aligned, pairs, regular, previews } = result
+    const verdict =
+      score >= threshold
+        ? ['很可能是同一部片', 'text-emerald-300']
+        : score >= threshold - 15
+          ? ['可能是同一部片，請看下面的畫面確認', 'text-amber-300']
+          : ['不像同一部片', 'text-neutral-400']
+    const tail = a.duration - offset - b.duration // what B lacks at the end compared with A
+    const timing = [
+      Math.abs(offset) < 0.5 ? '開頭對齊' : offset > 0 ? `開頭少了 ${secs(offset)}` : `開頭多了 ${secs(offset)}`,
+      Math.abs(tail) < 0.5 ? '結尾對齊' : tail > 0 ? `結尾少了 ${secs(tail)}` : `結尾多了 ${secs(tail)}`,
+    ].join('、')
+    const picture =
+      scale === null ? '對不上特徵點，用整張畫面比較' : Math.abs(scale - 1) < 0.03 ? '畫面大小相同' : `畫面大小差 ×${scale.toFixed(2)}（縮放、裁切或黑邊）`
+    body = (
+      <div className="space-y-4">
+        <div className="flex items-end gap-3">
+          <span className="text-4xl font-semibold tabular-nums">{Math.round(score)}%</span>
+          <span className={`pb-1 text-sm ${verdict[1]}`}>{verdict[0]}</span>
+        </div>
+        <dl className="space-y-1 text-sm">
+          {[
+            ['較長的', a.name],
+            ['較短的', b.name],
+            ['時間', `較短的比較長的${timing}（共同的部分 ${fmtDuration(overlap)}）`],
+            ['畫面', picture],
+            ['對齊成功', `${aligned} / ${pairs} 組畫面`],
+            ['一般比對', regular === null ? '-' : `${regular}%（固定時間點的截圖，門檻 ${threshold}%）`],
+          ].map(([k, v]) => (
+            <div key={k} className="flex gap-3">
+              <dt className="w-16 shrink-0 text-neutral-500">{k}</dt>
+              <dd className="min-w-0 break-all">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        {previews.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="text-sm text-neutral-400">對齊後的畫面（左：較長的，右：較短的）</h3>
+            {previews.map((p, i) => (
+              <figure key={i} className="space-y-1">
+                <div className="grid grid-cols-2 gap-1.5">
+                  <img src={p.a} alt="" className="w-full rounded bg-black object-contain" />
+                  <img src={p.b} alt="" className="w-full rounded bg-black object-contain" />
+                </div>
+                <figcaption className="flex justify-between text-xs tabular-nums text-neutral-500">
+                  <span>{fmtDuration(p.time_a)}</span>
+                  <span>相似度 {p.score}%</span>
+                  <span>{fmtDuration(p.time_b)}</span>
+                </figcaption>
+              </figure>
+            ))}
+          </section>
+        )}
+        {result.same_group && <p className="text-sm text-neutral-400">這兩部已經是同一部片的版本。</p>}
+        {error && <p className="text-sm text-red-400">{error}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onMouseDown={() => !busy && onClose()}>
+      <div
+        role="dialog"
+        aria-label="加強比對"
+        onMouseDown={(e) => e.stopPropagation()}
+        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl bg-neutral-900 shadow-2xl ring-1 ring-white/10"
+      >
+        <h2 className="border-b border-white/10 px-5 py-4 font-medium">🔬 加強比對</h2>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{body}</div>
+        <div className="flex justify-end gap-2 border-t border-white/10 p-4">
+          <button onClick={onClose} disabled={busy} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50">
+            {result ? '關閉' : '取消'}
+          </button>
+          {result && !result.same_group && (
+            <button onClick={merge} disabled={busy} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium hover:bg-accent-hover disabled:opacity-50">
+              {busy ? '合併中…' : '合併為同一部片'}
+            </button>
+          )}
         </div>
       </div>
     </div>

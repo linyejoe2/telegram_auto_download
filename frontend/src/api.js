@@ -46,6 +46,7 @@ export const api = {
   batchDelete: (ids) => request('POST', `${API}/batch/delete`, { ids }),
   batchCompare: (ids) => request('POST', `${API}/batch/compare`, { ids }),
   batchMerge: (groups) => request('POST', `${API}/batch/merge`, { groups }),
+  deepCompare: (ids) => request('POST', `${API}/batch/deep-compare`, { ids }),
 }
 
 // drag & drop payload between video items and folder tree nodes

@@ -1,5 +1,10 @@
 # ChangeLog
 
+## [3.4.8] - 2026-11-25 - Enhanced Compare
+### Added
+- Web library 🔬 加強比對 for exactly two selected videos (bottom bar button and right-click item, enabled only when 2 videos are selected, started by hand only): for copies with a cut start / end or a scaled / cropped / letterboxed picture that the normal screenshot check scores low (`library/deep_compare.py` `compare()`, `Library.deep_compare()`, `POST /library/api/batch/deep-compare`, `similarity.ssim_map()`)
+- It finds the time offset (brightness + frame change sampled 4/s over the first 180 s, cross-correlation up to 150 s), then checks 8 aligned moments (ORB + RANSAC warp, SSIM inside the overlap) and `DeepCompareDialog` shows the score with a verdict, time / scale difference, 對齊成功 n/8, the 一般比對 score and 3 aligned frame pairs; 合併為同一部片 merges the two (`Dialogs.jsx`, `Library.jsx`, `api.js`)
+
 ## [3.4.7] - 2026-11-25 - Merge Threshold Slider
 ### Changed
 - 🔗 嘗試合併 no longer merges at once: it compares first (`Library.compare_many()` replaces `merge_many()`, `POST /library/api/batch/compare`) and the new `MergeDialog` (replaces `MergeResultDialog`) has a 相似度門檻 slider (40–99 %, 回到預設) that regroups live and shows 「將合併成 N 部片（共 M 部影片）」, groups and 不合併 / 無法比對 lists sorted by similarity; 確定合併 sends the shown groups (`Library.join_groups()`, `POST /library/api/batch/merge` now takes `{groups}`), 取消 merges nothing; the slider applies to this merge only (`store.py`, `server.py`, `api.js`, `Dialogs.jsx`, `Library.jsx`)

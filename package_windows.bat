@@ -19,7 +19,7 @@ set "FRESH=0"
 if /i "%~1"=="fresh" set "FRESH=1"
 
 REM ===== Version constant =====
-set "APP_VERSION=3.4.7"
+set "APP_VERSION=3.4.8"
 REM ============================
 
 set "EXE_PATH=dist\TelegramAutoDownload\TelegramAutoDownload.exe"

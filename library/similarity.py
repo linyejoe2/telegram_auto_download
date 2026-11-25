@@ -31,6 +31,11 @@ _C2 = (0.03 * 255) ** 2
 
 def ssim(a: np.ndarray, b: np.ndarray) -> float:
     """Mean SSIM of two same-sized uint8 grayscale images (skimage defaults)."""
+    return float(ssim_map(a, b).mean())
+
+
+def ssim_map(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Per-pixel SSIM of two same-sized grayscale images, borders (half a window) cropped."""
     import cv2
     x = a.astype(np.float64)
     y = b.astype(np.float64)
@@ -43,7 +48,7 @@ def ssim(a: np.ndarray, b: np.ndarray) -> float:
     vxy = cov_norm * (blur(x * y) - ux * uy)
     s = ((2 * ux * uy + _C1) * (2 * vxy + _C2)) / ((ux ** 2 + uy ** 2 + _C1) * (vx + vy + _C2))
     pad = (_WIN - 1) // 2
-    return float(s[pad:-pad, pad:-pad].mean())
+    return s[pad:-pad, pad:-pad]
 
 
 def similarity(sig_a: np.ndarray, sig_b: np.ndarray) -> float:
