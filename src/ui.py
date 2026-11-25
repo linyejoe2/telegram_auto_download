@@ -21,11 +21,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .bot import log_queue, TelegramMediaBot
 import config.config as bot_config
 from .records import DownloadRecords
-from config.config import validate_config, get_web_settings
+from config.config import validate_config, get_web_settings, get_ai_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.4.9"
+        self.version = "v3.5.0"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -253,6 +253,26 @@ class TelegramBotGUI:
         ttk.Button(settings_frame, text="Save Web Settings", command=self.save_web_settings_clicked).grid(
             row=5, column=0, columnspan=2, sticky=tk.W, pady=10)
 
+        # AI 辨識 (library/recognize.py): outfits are described by a vision model on Ollama
+        ai = get_ai_settings()
+        ai_frame = ttk.LabelFrame(parent, text="AI Recognition (Ollama)", padding="10")
+        ai_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(ai_frame, text="Ollama URL:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.ollama_url_var = tk.StringVar(value=ai['ollama_url'])
+        ttk.Entry(ai_frame, textvariable=self.ollama_url_var, width=40).grid(row=0, column=1, sticky=tk.W, padx=5)
+        ttk.Button(ai_frame, text="Load Models", command=self.load_ollama_models).grid(row=0, column=2, sticky=tk.W, padx=5)
+        ttk.Label(ai_frame, text="Vision model:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.ollama_model_var = tk.StringVar(value=ai['ollama_model'])
+        self.ollama_model_box = ttk.Combobox(ai_frame, textvariable=self.ollama_model_var, width=37,
+                                             values=[ai['ollama_model']] if ai['ollama_model'] else [])
+        self.ollama_model_box.grid(row=1, column=1, sticky=tk.W, padx=5)
+        ttk.Button(ai_frame, text="Save", command=self.save_ai_settings).grid(row=1, column=2, sticky=tk.W, padx=5)
+        self.ollama_status_label = ttk.Label(
+            ai_frame, foreground="gray", wraplength=720, justify=tk.LEFT,
+            text="辨識系列 uses this model to compare outfits (empty model = the first one that can see pictures). "
+                 "辨識主演 uses a local face model and doesn't need Ollama.")
+        self.ollama_status_label.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+
         notes = ttk.LabelFrame(parent, text="Notes", padding="10")
         notes.pack(fill=tk.X, padx=10, pady=5)
         ttk.Label(notes, justify=tk.LEFT, wraplength=720, text=(
@@ -327,6 +347,44 @@ class TelegramBotGUI:
             self.stop_web()
             self.start_web()
         messagebox.showinfo("Success", "Web settings saved" + (" and the server restarted" if self.web_server else ""))
+
+    def load_ollama_models(self):
+        """Fill the model list with the vision models of the Ollama server (in the background)."""
+        url = self.ollama_url_var.get().strip()
+        self.ollama_status_label.config(text=f"Connecting to {url} …", foreground="gray")
+
+        def work():
+            try:
+                from library.recognize import Ollama
+                models = Ollama(url=url).models()
+                vision = [m['name'] for m in models if m['vision']]
+                if vision:
+                    text, color = (f"{len(vision)} vision model(s) found (of {len(models)}). "
+                                   "Pick one and press Save; empty = the first one."), "green"
+                else:
+                    text, color = f"Connected, but none of the {len(models)} model(s) can see pictures (vision).", "red"
+            except Exception as e:
+                vision, text, color = None, str(e), "red"
+
+            def show():
+                if vision is not None:
+                    self.ollama_model_box.config(values=[''] + vision)
+                self.ollama_status_label.config(text=text, foreground=color)
+            self.root.after(0, show)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def save_ai_settings(self):
+        url = self.ollama_url_var.get().strip().rstrip('/')
+        if not url.startswith(('http://', 'https://')):
+            messagebox.showerror("Error", "Ollama URL must start with http:// or https:// (e.g. http://localhost:11434)")
+            return
+        model = self.ollama_model_var.get().strip()
+        set_key('.env', 'OLLAMA_BASE_URL', url)
+        set_key('.env', 'OLLAMA_MODEL', model)
+        os.environ.update({'OLLAMA_BASE_URL': url, 'OLLAMA_MODEL': model})
+        self.ollama_url_var.set(url)
+        messagebox.showinfo("Success", "AI settings saved (used from the next recognition job, no restart needed)")
 
     def auto_start_web(self):
         settings = get_web_settings()

@@ -87,10 +87,11 @@ export default function Library({ guard, onLogout }) {
     setParams(next, { replace: true })
   }
 
-  function notify(text, error = false) {
-    setToast({ text, error })
+  // link: optional { label, to } shown as a button in the toast
+  function notify(text, error = false, link = null) {
+    setToast({ text, error, link })
     clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), error ? 6000 : 3000)
+    toastTimer.current = setTimeout(() => setToast(null), error ? 6000 : link ? 6000 : 3000)
   }
 
   async function load() {
@@ -317,6 +318,22 @@ export default function Library({ guard, onLogout }) {
     if (ids.length === 2) setDeepIds(ids)
   }
 
+  // AI 辨識: queue 辨識主演 (faces) / 辨識系列 (same person + same outfit); progress and results on /recognition
+  async function recognizeSelected(kind) {
+    const ids = picked.map((v) => v.id)
+    if (!ids.length) return
+    try {
+      const { job } = await api.recognize(kind, ids)
+      notify(`已加入 AI 辨識佇列：${job.title}（${job.count} 個）`, false, { label: '查看進度', to: '/recognition' })
+    } catch (e) {
+      try {
+        guard(e)
+      } catch (err) {
+        notify(err.message, true)
+      }
+    }
+  }
+
   async function confirmMerge(groups) {
     const result = await api.batchMerge(groups) // errors stay in the dialog
     setComparison(null)
@@ -342,6 +359,8 @@ export default function Library({ guard, onLogout }) {
           { label: `🏷 編輯已選 ${picked.length} 個的主演 / 系列`, onClick: () => setBulk(true) },
           { label: '🔗 嘗試合併為同一部片', disabled: pickedVideos < 2 || merging, onClick: mergeSelected },
           { label: '🔬 加強比對（只限兩部影片）', disabled: pickedVideos !== 2, onClick: deepCompare },
+          { label: '👤 AI 辨識主演', onClick: () => recognizeSelected('actor') },
+          { label: '👗 AI 辨識系列', onClick: () => recognizeSelected('series') },
           { label: '✖ 取消選取', onClick: exitSelect },
           '-',
           { label: `🗑 刪除已選 ${picked.length} 個`, danger: true, onClick: () => deleteSelected() },
@@ -753,6 +772,22 @@ export default function Library({ guard, onLogout }) {
                 🔬 加強比對
               </button>
               <button
+                onClick={() => recognizeSelected('actor')}
+                disabled={!picked.length}
+                className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40"
+                title="用人臉辨識找出主演：跟已經標好主演的影片 / 圖片比對，結果在 ☰ → AI 辨識 確認後才會套用"
+              >
+                👤 辨識主演
+              </button>
+              <button
+                onClick={() => recognizeSelected('series')}
+                disabled={!picked.length}
+                className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40"
+                title="同一個人穿同一套衣服歸為同一系列（用 Ollama 的視覺模型比對服裝），結果在 ☰ → AI 辨識 確認後才會套用"
+              >
+                👗 辨識系列
+              </button>
+              <button
                 onClick={() => deleteSelected()}
                 disabled={!picked.length || busy}
                 className="rounded-lg bg-red-900/70 px-3 py-1.5 text-red-100 hover:bg-red-800 disabled:opacity-40"
@@ -790,6 +825,11 @@ export default function Library({ guard, onLogout }) {
           }`}
         >
           {toast.text}
+          {toast.link && (
+            <button onClick={() => navigate(toast.link.to)} className="ml-3 font-medium text-accent hover:underline">
+              {toast.link.label} →
+            </button>
+          )}
         </div>
       )}
     </div>

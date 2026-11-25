@@ -1,5 +1,13 @@
 # ChangeLog
 
+## [3.5.0] - 2026-11-25 - AI Recognition
+### Added
+- Web library AI 辨識: select items, then 👤 辨識主演 (OpenCV YuNet + SFace face match against items already tagged, unknown faces clustered as 未知人物) or 👗 辨識系列 (same person + same outfit, outfits described and compared by an Ollama vision model) from the bottom bar or right-click menu; runs as a background queue (`library/recognize.py` `Recognizer`, `/library/api/recognition*`, `/library/media/{id}/ai/*.jpg`, `Library.jsx` `recognizeSelected()`)
+- New 🤖 AI 辨識 page `/recognition` in the ☰ menu (`Recognition.jsx`, `AppMenu.jsx`, `api.js`): job queue with progress, 取消 / 刪除, and results to review; nothing changes until 套用 (主演 added / 系列 set via `Library.update_many()`) or 略過; jobs and caches are kept in `<downloads>/.tad/recognition.json` and the hidden shots folder
+- Windows app Web Library tab: "AI Recognition (Ollama)" section (Ollama URL, Load Models, model, Save → `OLLAMA_BASE_URL` / `OLLAMA_MODEL`; `config.get_ai_settings()`); `telegram_bot.spec` bundles `library/models` when present, otherwise the face models download once on first use
+### Changed
+- `AppMenu.jsx` `PAGES` lists 🤖 AI 辨識 between 下載紀錄 and 設定
+
 ## [3.4.9] - 2026-11-25 - Remember Library Position
 ### Added
 - Web library page remembers its scroll position per view (folder / search / filters / sort / kind) in this tab: going back from a video or reloading the page returns to where you were once the list has loaded; the video page now opens at the top (`Library.jsx`, `VideoPage.jsx`, `main.jsx`, `api.js` `readSession()` / `writeSession()`)

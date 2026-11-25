@@ -4,12 +4,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 
 // The ☰ button at the top right of every page opens the right side bar: the pages (媒體庫 / 下載紀錄 /
-// 設定) and 登出. The left side bar of the library is the folder tree. Closes on the backdrop, ✕, Esc
+// AI 辨識 / 設定) and 登出. The left side bar of the library is the folder tree. Closes on the backdrop, ✕, Esc
 // or after choosing an item.
 
 const PAGES = [
   { path: '/', icon: '🎬', label: '媒體庫', hint: '影片與圖片' },
   { path: '/history', icon: '📜', label: '下載紀錄', hint: '所有下載過的檔案，已刪除的可重新下載' },
+  { path: '/recognition', icon: '🤖', label: 'AI 辨識', hint: '辨識主演 / 系列的進度與結果' },
   { path: '/settings', icon: '⚙', label: '設定', hint: '預設播放畫質、全螢幕' },
 ]
 

@@ -58,6 +58,15 @@ def get_web_settings() -> dict:
     }
 
 
+def get_ai_settings() -> dict:
+    """AI 辨識 (web library): the Ollama server and vision model used to describe / compare outfits.
+    An empty model means the first installed model that can see pictures (library/recognize.py)."""
+    return {
+        'ollama_url': os.getenv('OLLAMA_BASE_URL', '').strip() or 'http://localhost:11434',
+        'ollama_model': os.getenv('OLLAMA_MODEL', '').strip(),
+    }
+
+
 def similarity_threshold(default: float = 70) -> float:
     """Percent at which two videos of the same length count as versions of one video (SIMILARITY_THRESHOLD)."""
     try:

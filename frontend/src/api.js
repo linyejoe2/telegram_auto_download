@@ -47,6 +47,15 @@ export const api = {
   batchCompare: (ids) => request('POST', `${API}/batch/compare`, { ids }),
   batchMerge: (groups) => request('POST', `${API}/batch/merge`, { groups }),
   deepCompare: (ids) => request('POST', `${API}/batch/deep-compare`, { ids }),
+  // AI 辨識 (library/recognize.py): kind 'actor' (主演, by face) | 'series' (系列, by outfit)
+  recognize: (kind, ids) => request('POST', `${API}/recognition`, { kind, ids }),
+  recognitionJobs: () => request('GET', `${API}/recognition`),
+  recognitionStatus: () => request('GET', `${API}/recognition/status`),
+  recognitionJob: (id) => request('GET', `${API}/recognition/${id}`),
+  cancelRecognition: (id) => request('POST', `${API}/recognition/${id}/cancel`),
+  removeRecognition: (id) => request('DELETE', `${API}/recognition/${id}`),
+  // entries: [{ key, action: 'apply' | 'reject', name?, items? }]
+  applyRecognition: (id, entries) => request('POST', `${API}/recognition/${id}/apply`, { entries }),
 }
 
 // drag & drop payload between video items and folder tree nodes

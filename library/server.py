@@ -3,10 +3,11 @@ library/server.py — aiohttp server for the web video library.
 
 Everything lives under PREFIX (/library); "/" answers an empty page.
   /library/api/...            JSON API (login, videos / photos, tags, edit, delete, rescan,
-                              download history + download again)                    — login required
+                              download history + download again, AI 辨識 queue)     — login required
   /library/media/<id>/file    original file with HTTP range support (direct play)    — login required
   /library/media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start s>&q=<level> — login required
   /library/media/<id>/shots/  auto screenshots                                       — login required
+  /library/media/<id>/ai/     face / body crops made by AI 辨識                       — login required
   /library/...                the React frontend (library/static, built by `npm run build` in frontend/)
 
 Settings come from .env: WEB_PORT, WEB_HOST, WEB_PASSWORD_HASH, WEB_SECRET (see config.config).
@@ -26,6 +27,8 @@ from aiohttp import web
 
 from . import media
 from .auth import Sessions, verify_password
+from .recognize import AI_FILE_RE, Recognizer
+from .recognize import status as recognition_status
 from .store import Library, LibraryError, encode_id
 
 logger = logging.getLogger(__name__)
@@ -82,6 +85,7 @@ class LibraryServer:
         if similarity_threshold:
             self.library.threshold = similarity_threshold
         self.library.on_grouped = on_grouped
+        self.recognizer = Recognizer(self.library)      # AI 辨識 queue (library/recognize.py)
         # download a deleted file again through the running bot: returns an error text or None
         self.on_redownload = on_redownload
         self.sessions = Sessions(secret, password_hash)
@@ -120,12 +124,20 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/batch/compare', self.batch_compare)
         r.add_post(PREFIX + '/api/batch/merge', self.batch_merge)
         r.add_post(PREFIX + '/api/batch/deep-compare', self.deep_compare)
+        r.add_get(PREFIX + '/api/recognition', self.recognition_jobs)
+        r.add_post(PREFIX + '/api/recognition', self.recognition_add)
+        r.add_get(PREFIX + '/api/recognition/status', self.recognition_status)
+        r.add_get(PREFIX + '/api/recognition/{job}', self.recognition_job)
+        r.add_delete(PREFIX + '/api/recognition/{job}', self.recognition_remove)
+        r.add_post(PREFIX + '/api/recognition/{job}/cancel', self.recognition_cancel)
+        r.add_post(PREFIX + '/api/recognition/{job}/apply', self.recognition_apply)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
         r.add_get(PREFIX + '/api/history', self.history)
         r.add_post(PREFIX + '/api/history/redownload', self.redownload)
         r.add_get(PREFIX + '/media/{id}/file', self.media_file)
         r.add_get(PREFIX + '/media/{id}/stream', self.media_stream)
         r.add_get(PREFIX + '/media/{id}/shots/{name}', self.media_shot)
+        r.add_get(PREFIX + '/media/{id}/ai/{name}', self.media_ai)
         r.add_get('/', self.blank)
         r.add_get(PREFIX, self.to_app)
         r.add_get(PREFIX + '/{tail:.*}', self.frontend)
@@ -364,6 +376,54 @@ class LibraryServer:
         result, error = await self._run(self.library.join_groups, groups)
         return error or web.json_response(result)
 
+    # ── AI 辨識 (library/recognize.py) ──
+
+    async def recognition_jobs(self, request: web.Request):
+        jobs = await asyncio.get_running_loop().run_in_executor(None, self.recognizer.jobs)
+        return web.json_response({'jobs': jobs})
+
+    async def recognition_status(self, request: web.Request):
+        """Face models present, Ollama reachable and the vision model used (a few seconds when Ollama is down)."""
+        data = await asyncio.get_running_loop().run_in_executor(None, recognition_status)
+        return web.json_response(data)
+
+    async def recognition_add(self, request: web.Request):
+        """Queue 辨識主演 / 辨識系列: {kind: 'actor'|'series', ids} -> the queued job."""
+        body = await self._body(request)
+        ids = self._strings(body.get('ids'))
+        if not ids:
+            return web.json_response({'error': '沒有選取任何項目'}, status=400)
+        try:
+            job = await asyncio.get_running_loop().run_in_executor(None, self.recognizer.add, body.get('kind'), ids)
+        except ValueError as e:
+            return web.json_response({'error': str(e)}, status=400)
+        return web.json_response({'job': job})
+
+    async def recognition_job(self, request: web.Request):
+        job = await asyncio.get_running_loop().run_in_executor(None, self.recognizer.job, request.match_info['job'])
+        return web.json_response(job) if job else web.json_response({'error': '找不到辨識工作'}, status=404)
+
+    async def recognition_cancel(self, request: web.Request):
+        ok = self.recognizer.cancel(request.match_info['job'])
+        return web.json_response({'ok': True}) if ok else web.json_response({'error': '找不到辨識工作'}, status=404)
+
+    async def recognition_remove(self, request: web.Request):
+        ok = await asyncio.get_running_loop().run_in_executor(None, self.recognizer.remove, request.match_info['job'])
+        return web.json_response({'ok': True}) if ok else web.json_response({'error': '找不到辨識工作'}, status=404)
+
+    async def recognition_apply(self, request: web.Request):
+        """Use / skip results: {entries: [{key, action: 'apply'|'reject', name?, items?}]} -> {job, updated, missing}."""
+        body = await self._body(request)
+        entries = [e for e in body.get('entries') or [] if isinstance(e, dict)]
+        if not entries:
+            return web.json_response({'error': '沒有要套用的結果'}, status=400)
+        try:
+            result = await asyncio.get_running_loop().run_in_executor(
+                None, self.recognizer.apply, request.match_info['job'], entries)
+        except ValueError as e:
+            return web.json_response({'error': str(e)}, status=400)
+        return web.json_response(result)
+
     async def rescan(self, request: web.Request):
         count = await asyncio.get_running_loop().run_in_executor(None, self.library.scan)
         return web.json_response({'videos': count, 'processing': self.library.processing})
@@ -424,6 +484,16 @@ class LibraryServer:
         if not os.path.isfile(path):
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={'Cache-Control': 'private, max-age=86400'})
+
+    async def media_ai(self, request: web.Request):
+        """Face / body crops made by AI 辨識 (face_N.jpg, body_N.jpg in the shots folder)."""
+        name = request.match_info['name']
+        if not AI_FILE_RE.match(name):
+            raise web.HTTPNotFound()
+        path = os.path.join(media.shots_dir(self._video_path(request)), name)
+        if not os.path.isfile(path):
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={'Cache-Control': 'private, no-cache'})
 
     async def media_stream(self, request: web.Request):
         """Fragmented MP4 (H.264 + AAC) from `t` seconds on; the player restarts it to seek."""
@@ -495,6 +565,7 @@ class LibraryServer:
         await web.TCPSite(self._runner, self.host, self.port).start()
         logger.info(f"網頁影片庫已啟動：http://{self.host}:{self.port}{PREFIX}/")
         self._rescan_task = asyncio.create_task(self._rescan_loop())
+        self.recognizer.start()             # continues jobs left in .tad/recognition.json
 
     async def _rescan_loop(self):
         loop = asyncio.get_running_loop()
@@ -518,6 +589,7 @@ class LibraryServer:
         if self._runner:
             await self._runner.cleanup()
             self._runner = None
+        self.recognizer.shutdown()
         self.library.shutdown()
         logger.info("網頁影片庫已停止")
 

@@ -121,6 +121,7 @@ hiddenimports = [
     'library.auth',
     'library.similarity',
     'library.deep_compare',
+    'library.recognize',
     'src.video_loader',
 
     # custom
@@ -142,10 +143,16 @@ datas = [
 
     # Web library frontend (built by package_windows.bat: npm run build in frontend/)
     (os.path.join(project_root, 'library', 'static'), os.path.join('library', 'static')),
-    
+
     # Include any template or resource files
     # (os.path.join(project_root, 'resources'), 'resources'),  # If you have resources
 ]
+
+# AI 辨識 face models (OpenCV YuNet + SFace, library/models, not in git); without them the app
+# downloads them on first use (library/recognize.py model_path)
+_face_models = os.path.join(project_root, 'library', 'models')
+if os.path.isdir(_face_models) and any(n.endswith('.onnx') for n in os.listdir(_face_models)):
+    datas.append((_face_models, os.path.join('library', 'models')))
 
 # Additional data files from packages
 try:

@@ -6,6 +6,7 @@ import Library from './pages/Library.jsx'
 import VideoPage from './pages/VideoPage.jsx'
 import History from './pages/History.jsx'
 import Settings from './pages/Settings.jsx'
+import Recognition from './pages/Recognition.jsx'
 
 export default function App() {
   const [authed, setAuthed] = useState(null) // null = checking
@@ -31,6 +32,7 @@ export default function App() {
       <Route path="/v/:id" element={<VideoPage guard={guard} onLogout={onLogout} />} />
       <Route path="/history" element={<History guard={guard} onLogout={onLogout} />} />
       <Route path="/settings" element={<Settings onLogout={onLogout} />} />
+      <Route path="/recognition" element={<Recognition guard={guard} onLogout={onLogout} />} />
       <Route path="*" element={<Library guard={guard} onLogout={onLogout} />} />
     </Routes>
   )

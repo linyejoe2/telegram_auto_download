@@ -253,3 +253,5 @@ library/static/
 
 # Separate reference repo (its own .git), not part of this project
 example/
+# AI 辨識 face models (OpenCV YuNet + SFace ONNX, ~38 MB; downloaded on first use if missing)
+library/models/
