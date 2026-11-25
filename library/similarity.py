@@ -60,7 +60,12 @@ def build_signature(video: str, shots: list) -> Optional[np.ndarray]:
     folder = media.shots_dir(video)
     frames = []
     for index in SIG_SHOTS:
-        img = cv2.imread(os.path.join(folder, shots[index]), cv2.IMREAD_GRAYSCALE)
+        # not cv2.imread: on Windows it can't open paths with non-ASCII characters (Chinese folder / file names)
+        try:
+            data = np.fromfile(os.path.join(folder, shots[index]), dtype=np.uint8)
+        except OSError:
+            return None
+        img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE) if data.size else None
         if img is None:
             return None
         frames.append(cv2.resize(img, SIG_SIZE, interpolation=cv2.INTER_AREA))

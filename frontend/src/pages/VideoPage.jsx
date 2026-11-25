@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { api, fmtBitrate, fmtDuration, fmtSize, MEDIA, resolutionLabel } from '../api.js'
+import { api, fmtBitrate, fmtDuration, fmtSize, listNeighbors, MEDIA, resolutionLabel } from '../api.js'
 import Player from '../components/Player.jsx'
 import AppMenu from '../components/AppMenu.jsx'
 import TagInput from '../components/TagInput.jsx'
@@ -50,6 +50,12 @@ export default function VideoPage({ guard, onLogout }) {
   const currentId = useRef(id) // ignore answers for a photo the user already swiped past
   const swipe = useRef(null) // touch in progress: { x, y, dx, dir }
   const [dragX, setDragX] = useState(0)
+  const stage = useRef(null) // what goes fullscreen; stays while swiping to the next video
+  // videos: previous / next in the library's order (only when opened from the library)
+  const vnav = useMemo(
+    () => (video && video.kind !== 'photo' ? listNeighbors(video, location.state?.back) : {}),
+    [video?.id, location.state?.back],
+  )
 
   async function load() {
     try {
@@ -115,6 +121,35 @@ export default function VideoPage({ guard, onLogout }) {
       }
     }
   }, [video])
+
+  // videos: load the neighbors' details and first screenshots ahead (shown while swiping)
+  useEffect(() => {
+    for (const nid of [vnav.next, vnav.prev].filter(Boolean)) {
+      const cached = detailCache.get(nid)
+      const shot = (d) => {
+        const url = d?.shots?.[0]
+        if (url && !preloaded.has(url)) {
+          const img = new Image()
+          img.src = url
+          remember(preloaded, url, img)
+        }
+      }
+      if (cached) shot(cached)
+      else api.video(nid).then((d) => (remember(detailCache, nid, d), shot(d))).catch(() => {})
+    }
+  }, [vnav.prev, vnav.next])
+
+  // videos: swiped on the player; the next one plays from the start (fullscreen stays on)
+  async function swipeTo(dir) {
+    const nid = vnav[dir]
+    if (!nid) return
+    if (!detailCache.has(nid)) {
+      try {
+        remember(detailCache, nid, await api.video(nid))
+      } catch {}
+    }
+    navigate(`/v/${nid}`, { replace: true, state: { back: location.state?.back, resume: 0 } })
+  }
 
   // photos on touch screens: drag sideways to switch (the image follows the finger)
   function onTouchStart(e) {
@@ -328,7 +363,19 @@ export default function VideoPage({ guard, onLogout }) {
               )}
             </div>
           ) : playFrom !== null ? (
-            <Player key={`${id}-${playFrom}`} video={video} startAt={playFrom} onTime={(t) => (playTime.current = t)} />
+            <div ref={stage}>
+              {/* keyed by the shown video: right after a swipe the old one is still shown for a moment */}
+              <Player
+                key={`${video.id}-${playFrom}`}
+                video={video}
+                startAt={playFrom}
+                onTime={(t) => (playTime.current = t)}
+                container={stage}
+                nav={vnav}
+                onSwipe={swipeTo}
+                posterOf={(dir) => detailCache.get(vnav[dir])?.shots?.[0]}
+              />
+            </div>
           ) : (
             <>
               <button

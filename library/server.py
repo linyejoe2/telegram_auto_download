@@ -117,6 +117,7 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/move', self.move)
         r.add_post(PREFIX + '/api/batch/update', self.batch_update)
         r.add_post(PREFIX + '/api/batch/delete', self.batch_delete)
+        r.add_post(PREFIX + '/api/batch/merge', self.batch_merge)
         r.add_post(PREFIX + '/api/rescan', self.rescan)
         r.add_get(PREFIX + '/api/history', self.history)
         r.add_post(PREFIX + '/api/history/redownload', self.redownload)
@@ -332,6 +333,15 @@ class LibraryServer:
         if not ids:
             return web.json_response({'error': '沒有選取任何項目'}, status=400)
         result, error = await self._run(self.library.delete_many, ids)
+        return error or web.json_response(result)
+
+    async def batch_merge(self, request: web.Request):
+        """Multi-select 「嘗試合併」: {ids} -> {groups, already, unmatched, photos, threshold}."""
+        body = await self._body(request)
+        ids = self._strings(body.get('ids'))
+        if len(ids) < 2:
+            return web.json_response({'error': '請至少選取兩部影片'}, status=400)
+        result, error = await self._run(self.library.merge_many, ids)
         return error or web.json_response(result)
 
     async def rescan(self, request: web.Request):

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, storedKind } from '../api.js'
+import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, saveList, storedKind } from '../api.js'
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
 import AppMenu from '../components/AppMenu.jsx'
-import { BulkEditDialog, ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
+import { BulkEditDialog, ContextMenu, MergeResultDialog, PromptDialog } from '../components/Dialogs.jsx'
 
 const SORTS = {
   added: { label: '最新加入', fn: (a, b) => (b.added || 0) - (a.added || 0) },
@@ -64,6 +64,8 @@ export default function Library({ guard, onLogout }) {
   const [selecting, setSelecting] = useState(false) // multi-select mode
   const [selected, setSelected] = useState(() => new Set()) // ids
   const [bulk, setBulk] = useState(false) // BulkEditDialog open
+  const [merged, setMerged] = useState(null) // result of 嘗試合併 (MergeResultDialog)
+  const [merging, setMerging] = useState(false)
   const anchor = useRef(null) // last clicked item, start of a Shift-click range
   const toastTimer = useRef(null)
   const [params, setParams] = useSearchParams() // filters live in the URL so "back" keeps them
@@ -290,6 +292,16 @@ export default function Library({ guard, onLogout }) {
     } else notify(`已刪除 ${result.deleted} 個項目`)
   }
 
+  // 嘗試合併: group the selected videos that the similarity check finds to be the same video
+  async function mergeSelected() {
+    const ids = picked.filter((v) => v.kind !== 'photo').map((v) => v.id)
+    if (ids.length < 2 || merging) return
+    setMerging(true)
+    const result = await act(() => api.batchMerge(ids))
+    setMerging(false)
+    if (result) setMerged(result)
+  }
+
   async function bulkUpdate(changes) {
     const result = await api.batchUpdate(picked.map((v) => v.id), changes)
     setBulk(false)
@@ -304,6 +316,7 @@ export default function Library({ guard, onLogout }) {
         y,
         items: [
           { label: `🏷 編輯已選 ${picked.length} 個的主演 / 系列`, onClick: () => setBulk(true) },
+          { label: '🔗 嘗試合併為同一部片', disabled: pickedVideos < 2 || merging, onClick: mergeSelected },
           { label: '✖ 取消選取', onClick: exitSelect },
           '-',
           { label: `🗑 刪除已選 ${picked.length} 個`, danger: true, onClick: () => deleteSelected() },
@@ -350,9 +363,15 @@ export default function Library({ guard, onLogout }) {
     return items.sort(SORTS[sort]?.fn || SORTS.added.fn)
   }, [videos, q, actor, series, folder, sort])
 
+  // the video page swipes through the videos in this order (same filters / sort, a group once)
+  useEffect(() => {
+    if (videos) saveList(params.toString(), shown.filter((v) => v.kind !== 'photo'))
+  }, [shown])
+
   // only what is on screen can be selected: filtering / deleting drops the rest
   const picked = useMemo(() => shown.filter((v) => selected.has(v.id)), [shown, selected])
   const pickedIds = useMemo(() => picked.map((v) => v.id), [picked])
+  const pickedVideos = picked.filter((v) => v.kind !== 'photo').length
   useEffect(() => {
     if (picked.length !== selected.size) setSelected(new Set(pickedIds))
   }, [picked])
@@ -573,7 +592,7 @@ export default function Library({ guard, onLogout }) {
               onClick={() => (selecting ? exitSelect() : setSelecting(true))}
               aria-pressed={selecting}
               className={`rounded-lg px-3 py-1.5 text-sm ${selecting ? 'bg-accent/80 text-white' : 'bg-neutral-800 hover:bg-neutral-700'}`}
-              title="選取多個項目來一起刪除或編輯主演 / 系列（也可以 Ctrl / Shift + 點選）"
+              title="選取多個項目來一起刪除、編輯主演 / 系列或嘗試合併（也可以 Ctrl / Shift + 點選）"
             >
               ☑ 選取
             </button>
@@ -661,6 +680,14 @@ export default function Library({ guard, onLogout }) {
                 🏷 編輯主演 / 系列
               </button>
               <button
+                onClick={mergeSelected}
+                disabled={pickedVideos < 2 || merging}
+                className="rounded-lg bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700 disabled:opacity-40"
+                title="用截圖相似度比對選取的影片，相似的合併為同一部片的不同版本"
+              >
+                {merging ? '比對中…' : '🔗 嘗試合併'}
+              </button>
+              <button
                 onClick={() => deleteSelected()}
                 disabled={!picked.length || busy}
                 className="rounded-lg bg-red-900/70 px-3 py-1.5 text-red-100 hover:bg-red-800 disabled:opacity-40"
@@ -686,6 +713,7 @@ export default function Library({ guard, onLogout }) {
           onCancel={() => setBulk(false)}
         />
       )}
+      {merged && <MergeResultDialog result={merged} onClose={() => setMerged(null)} />}
       <div ref={boxEl} aria-hidden className="pointer-events-none fixed z-40 hidden rounded-sm border border-accent bg-accent/15" />
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {dialog && <PromptDialog {...dialog} onCancel={() => setDialog(null)} />}

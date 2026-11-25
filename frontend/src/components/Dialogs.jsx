@@ -187,6 +187,80 @@ export function BulkEditDialog({ items, actorSuggestions = [], seriesSuggestions
   )
 }
 
+// Result of the multi-select 「嘗試合併」: the groups made and why the other videos stayed apart.
+const UNMATCHED = {
+  low: (u, t) => `最相似只有 ${u.best}%（門檻 ${t}%）`,
+  length: () => '沒有長度相近（±3 秒）的其他選取影片',
+  not_ready: () => '還沒有截圖或影片資訊（處理中，稍後再試）',
+  unreadable: () => '截圖無法讀取（可在影片頁按「重新產生截圖」）',
+}
+
+export function MergeResultDialog({ result, onClose }) {
+  const { groups, already, unmatched, photos, threshold } = result
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const range = (g) => (g.min === g.max ? `${g.min}%` : `${g.min}%–${g.max}%`)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onMouseDown={onClose}>
+      <div
+        role="dialog"
+        aria-label="合併結果"
+        onMouseDown={(e) => e.stopPropagation()}
+        className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-xl bg-neutral-900 p-5 shadow-2xl ring-1 ring-white/10"
+      >
+        <h2 className="font-medium">{groups.length ? `已合併成 ${groups.length} 部片` : '沒有可以合併的影片'}</h2>
+        {groups.length > 0 && (
+          <section className="space-y-2">
+            {groups.map((g, i) => (
+              <div key={i} className="rounded-lg bg-neutral-800/70 px-3 py-2 text-sm ring-1 ring-white/10">
+                <div className="font-medium">
+                  {g.title} <span className="text-xs font-normal text-neutral-400">· {g.versions} 個版本 · 相似度 {range(g)}</span>
+                </div>
+                <ul className="mt-1 space-y-0.5 text-xs text-neutral-400">
+                  {g.files.map((f) => (
+                    <li key={f} className="truncate">{f}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
+        )}
+        {unmatched.length > 0 && (
+          <section className="space-y-1.5">
+            <h3 className="text-sm text-neutral-400">沒有合併的 {unmatched.length} 部</h3>
+            <ul className="space-y-1 text-sm">
+              {unmatched.map((u, i) => (
+                <li key={i} className="min-w-0">
+                  <span className="block truncate">{u.name}</span>
+                  <span className="block text-xs text-neutral-500">{UNMATCHED[u.reason](u, threshold)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {(already > 0 || photos > 0) && (
+          <p className="text-xs text-neutral-500">
+            {[already && `${already} 組本來就是同一部片的版本`, photos && `${photos} 張圖片不比對`].filter(Boolean).join('；')}
+          </p>
+        )}
+        <p className="text-xs text-neutral-500">
+          用和自動歸類相同的方法比對：片長相差 3 秒內，截圖相似度達 {threshold}%（門檻在 Windows 程式的 Web Library 頁設定）。
+          合併錯了可以在影片頁按「從群組移出」。
+        </p>
+        <div className="flex justify-end">
+          <button onClick={onClose} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium hover:bg-accent-hover">
+            確定
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Right-click menu at the mouse position; closes on outside click, scroll or Escape.
 export function ContextMenu({ x, y, items, onClose }) {
   const ref = useRef(null)

@@ -44,6 +44,7 @@ export const api = {
   // multi-select: { add_actors, remove_actors, series? } ('' clears 系列, leave it out to keep it)
   batchUpdate: (ids, changes) => request('POST', `${API}/batch/update`, { ids, ...changes }),
   batchDelete: (ids) => request('POST', `${API}/batch/delete`, { ids }),
+  batchMerge: (ids) => request('POST', `${API}/batch/merge`, { ids }),
 }
 
 // drag & drop payload between video items and folder tree nodes
@@ -90,6 +91,29 @@ export function rememberKind(kind) {
 }
 
 export const dimensions = (w, h) => (w && h ? `${w}×${h}` : null)
+
+// The library's current video order (this tab only), so the video page can swipe to the previous /
+// next one. `back` is the library's query string: the list is used only when the page was opened from
+// that view. Items are [id, group] so another version of a shown video finds its place too.
+const LIST_KEY = 'tad.list'
+
+export function saveList(back, videos) {
+  try {
+    sessionStorage.setItem(LIST_KEY, JSON.stringify({ back, items: videos.map((v) => [v.id, v.group || '']) }))
+  } catch {}
+}
+
+export function listNeighbors(video, back) {
+  let list
+  try {
+    list = JSON.parse(sessionStorage.getItem(LIST_KEY))
+  } catch {}
+  if (!list || typeof back !== 'string' || list.back !== back || !Array.isArray(list.items)) return {}
+  let i = list.items.findIndex(([id]) => id === video.id)
+  if (i < 0 && video.group) i = list.items.findIndex(([, group]) => group === video.group)
+  if (i < 0) return {}
+  return { prev: list.items[i - 1]?.[0] || null, next: list.items[i + 1]?.[0] || null, index: i + 1, total: list.items.length }
+}
 
 export const baseName = (path) => path.split('/').pop()
 export const parentOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')

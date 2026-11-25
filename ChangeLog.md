@@ -1,5 +1,22 @@
 # ChangeLog
 
+## [3.4.6] - 2026-11-25 - Similarity Fix for Chinese Paths
+### Fixed
+- Videos in folders or with file names containing Chinese (non-ASCII) characters never got a similarity signature on Windows (`cv2.imread` can't open such paths), so automatic grouping never compared them and 🔗 嘗試合併 said 「還沒有截圖或影片資訊」; screenshots are now read with `np.fromfile` + `cv2.imdecode` (`library/similarity.py` `build_signature()`). The next startup full check compares these videos for the first time, so it may group some automatically and take longer once
+### Changed
+- 🔗 嘗試合併 reports a new reason `unreadable` (screenshots exist but can't be read) shown as 「截圖無法讀取（可在影片頁按「重新產生截圖」）」 (`store.py` `merge_many()`, `Dialogs.jsx` `MergeResultDialog`)
+
+## [3.4.5] - 2026-11-25 - Swipe Between Videos
+### Added
+- Web library video page: on touch screens, swiping sideways on the player (fullscreen too) switches to the previous / next video like Telegram's viewer: the picture follows the finger with the neighbor's first screenshot beside it, 60 px or a quick flick switches, otherwise it springs back; the new video starts from 0 and fullscreen stays on; order = the library page's current folder / search / filters / sort (`api.js` `saveList()` / `listNeighbors()`, `Library.jsx`, `VideoPage.jsx` `swipeTo()`, `Player.jsx`)
+### Changed
+- Original-file playback uses the same custom controls as the transcode player (native controls removed, so Chrome's speed / picture-in-picture / download menu is gone); fullscreen and orientation lock now follow the video across switches (`Player.jsx`)
+
+## [3.4.4] - 2026-11-25 - Try Merge Selected Videos
+### Added
+- Web library multi-select: 🔗 嘗試合併 in the bottom bar (and 🔗 嘗試合併為同一部片 in the right-click menu of a selection) compares the selected videos (2 or more, photos ignored) with the automatic grouping check (length within ±3 s, screenshot similarity >= the threshold; a match of a match joins too) and puts matches into one group; pairs split with 「從群組移出」 are compared too and, when merged, lose that mark (`not_same`) for each other (`library/store.py` `merge_many()`, `POST /library/api/batch/merge`, `Library.jsx` `mergeSelected()`)
+- Result dialog (`Dialogs.jsx` `MergeResultDialog`): merged groups with version count and similarity range, unmerged videos with the reason (best score vs threshold / no video of similar length / screenshots not made yet), already-grouped and photo counts; a wrong merge is undone with 「從群組移出」 on the video page
+
 ## [3.4.3] - 2026-11-24 - Settings Page & Side Menu
 ### Added
 - Web library ☰ side menu at the top right of every page (`AppMenu.jsx`): 🎬 媒體庫 / 📜 下載紀錄 / ⚙ 設定 and 登出; new 設定 page `/settings` (`Settings.jsx`, `settings.js`) with the default playback quality (原始 or a transcode level with its cap and data per hour) and fullscreen 填滿 / 完整, saved per browser (`tad.quality`, `tad.fill`)
