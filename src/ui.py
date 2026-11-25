@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings, get_ai_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.6.1"
+        self.version = "v3.6.2"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -518,7 +518,10 @@ class TelegramBotGUI:
             pass
         lines.append(f"Web library: running, {len(lib.entries)} items, {lib.processing} being processed "
                      f"(info / screenshots), {lib.deferred} still being written, similarity check "
-                     f"{'done' if lib.matching_ready else 'running'} (asyncio tasks: {web_tasks})")
+                     f"{'done' if lib.matching_ready else 'running'}, last folder scan took "
+                     f"{getattr(lib, 'last_scan_seconds', 0):.1f} s (asyncio tasks: {web_tasks})")
+        if lib.deferred:          # these make the folder rescan every minute instead of every 5
+            lines.append("   still being written: " + ", ".join(getattr(lib, 'deferred_paths', [])))
         try:
             jobs = server.recognizer.jobs()
             running = [j for j in jobs if j['status'] == 'running']
@@ -1014,7 +1017,10 @@ class TelegramBotGUI:
 
     def run_bot(self):
         """Run the bot in a separate thread on its own cancellable event loop"""
+        from concurrent.futures import ThreadPoolExecutor
         loop = asyncio.new_event_loop()
+        # named, so the Diagnostics tab tells this pool from the web library's (both were "asyncio_N")
+        loop.set_default_executor(ThreadPoolExecutor(thread_name_prefix='bot-worker'))
         self.bot_loop = loop
         try:
             asyncio.set_event_loop(loop)

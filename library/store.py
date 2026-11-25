@@ -87,6 +87,8 @@ class Library:
         self._pending = set()                    # ids with a background job queued / running
         self.last_scan = 0.0
         self.deferred = 0                        # videos skipped by the last scan because they're still changing
+        self.deferred_paths: List[str] = []
+        self.last_scan_seconds = 0.0             # how long the last scan of the folder took
         # versions (same video in another quality / with a watermark), see library/similarity.py
         self.threshold = similarity.DEFAULT_THRESHOLD   # percent
         self.on_grouped: Optional[Callable[[str], None]] = None   # e.g. a Telegram notice
@@ -120,6 +122,7 @@ class Library:
 
     def scan(self) -> int:
         """Rebuild the index from disk; queue info / screenshot jobs for items that need them."""
+        started = time.time()
         base = self.base()
         found = {}
         for root, dirs, files in os.walk(base):
@@ -146,6 +149,8 @@ class Library:
             fresh = [vid for vid in todo if self._still_changing(self.entries[vid]['path'])]
             todo = [vid for vid in todo if vid not in fresh]
             self.deferred = len(fresh)
+            self.deferred_paths = [self.entries[vid]['rel'] for vid in fresh[:5]]    # Windows app Diagnostics
+            self.last_scan_seconds = time.time() - started
         for vid in todo:
             self.queue_refresh(vid)
         photos = sum(1 for e in self.entries.values() if e['kind'] == 'photo')
@@ -169,9 +174,12 @@ class Library:
     @staticmethod
     def _still_changing(path: str) -> bool:
         try:
-            return time.time() - os.path.getmtime(path) < SETTLE_SECONDS
+            age = time.time() - os.path.getmtime(path)
         except OSError:
             return True
+        # a file dated in the future (wrong clock, copied from another PC) would never "settle": with it
+        # the library rescanned the whole folder every minute forever. Only recent past times count.
+        return -60 < age < SETTLE_SECONDS
 
     @staticmethod
     def _needs_refresh(entry: dict) -> bool:

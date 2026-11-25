@@ -1,5 +1,12 @@
 # ChangeLog
 
+## [3.6.2] - 2026-11-25 - Idle CPU Fixes
+### Fixed
+- 人物 page list (`People.overview()`, `GET /library/api/people`) looped over every item and face reference once per person, so one request took seconds with many 未命名人物 (~5.8 s for 5,000 items / 2,300 people) and the page's 2.5 s polling could keep the web library's worker thread busy all the time (the likely cause of the 90 % CPU seen while idle); now built in one pass (~13 ms) with the database lock held only while copying (`library/people.py`)
+- A file whose modified time is in the future (wrong clock, copied from another PC) counted as "still being written" forever, so the library rescanned the whole downloads folder every minute instead of every 5; `Library._still_changing()` now only counts times up to 60 s ahead (`library/store.py`)
+### Changed
+- The asyncio thread pools are named `web-library-worker` / `bot-worker` (both were `asyncio_N`); the Diagnostics web library line shows the last folder scan time and the files still being written (`library/server.py`, `src/ui.py`)
+
 ## [3.6.1] - 2026-11-25 - Diagnostics Tab
 ### Added
 - Windows app Diagnostics tab to find what uses the CPU when the app seems idle: live table (2 s, only while the tab is open) of CPU per thread (Python threads by name, native threads as "native thread <id>") and per child process (ffmpeg, node …), a machine-wide summary, and status lines for bot / web library / AI 辨識 / people database (`src/ui.py` `setup_diagnostics_tab()`, `_diagnostic_state()`)

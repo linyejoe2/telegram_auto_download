@@ -650,7 +650,10 @@ class LibraryServer:
         started, failure = threading.Event(), []
 
         def run():
+            from concurrent.futures import ThreadPoolExecutor
             self._loop = asyncio.new_event_loop()
+            # named, so the Windows app's Diagnostics tab tells this pool from the bot's (both were "asyncio_N")
+            self._loop.set_default_executor(ThreadPoolExecutor(thread_name_prefix='web-library-worker'))
             asyncio.set_event_loop(self._loop)
             try:
                 self._loop.run_until_complete(self.start())

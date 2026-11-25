@@ -396,20 +396,18 @@ class People:
 
     # ── the 人物 page ──
 
-    def _uid_map(self, snap) -> Dict[str, dict]:
-        return {e['uid']: e for e in snap}
-
     def _members(self, pid: str, snap: List[dict]) -> List[dict]:
         """Items of a person: tagged with its name (named) or holding one of its faces (unnamed)."""
         person = self.people[pid]
+        low = (person['name'] or '').lower()
         faces = {}
         for r in self.refs:
             if r['pid'] == pid:
                 faces.setdefault(r['uid'], r['pi'])
         out = []
         for e in snap:
-            if person['name']:
-                if person['name'].lower() not in {a.lower() for a in e['actors']}:
+            if low:
+                if not any(a.lower() == low for a in e['actors']):
                     continue
             elif e['uid'] not in faces:
                 continue
@@ -417,7 +415,7 @@ class People:
             out.append({'id': e['vid'], 'name': os.path.basename(e['rel']), 'folder': os.path.dirname(e['rel']),
                         'kind': e['kind'], 'cover': e['cover'],
                         'face': f"{MEDIA_URL}/{e['vid']}/ai/face_{pi + 1}.jpg" if pi is not None else None,
-                        'auto': any(a.lower() == (person['name'] or '').lower() for a in e['auto'])})
+                        'auto': bool(low) and any(a.lower() == low for a in e['auto'])})
         return out
 
     @staticmethod
@@ -425,21 +423,45 @@ class People:
         return person['name'] or f"未命名人物 #{person['num']}"
 
     def overview(self) -> dict:
+        """The 人物 list. One pass over the items and one over the references (it used to scan every item
+        and every reference per person, which took seconds with many 未命名人物 and the page polls it)."""
         snap = self._snapshot()
+        by_uid = {e['uid']: e for e in snap}
+        tagged, auto = {}, {}                    # name lower -> items tagged / auto-tagged
+        for e in snap:
+            autos = {a.lower() for a in e['auto']}
+            for a in {a.lower() for a in e['actors']}:
+                tagged.setdefault(a, []).append(e)
+                if a in autos:
+                    auto[a] = auto.get(a, 0) + 1
         with self._lock:
             self._load()
-            out = []
-            for pid, p in self.people.items():
-                members = self._members(pid, snap)
-                if not members and not p['name']:
-                    continue
-                cover = next((m['face'] for m in members if m['face']), None) or next((m['cover'] for m in members if m['cover']), None)
-                out.append({'id': pid, 'name': p['name'], 'label': self.label(p), 'num': p['num'],
-                            'count': len(members), 'auto': sum(1 for m in members if m['auto']), 'cover': cover,
-                            'faces': sum(1 for r in self.refs if r['pid'] == pid)})
-            unscanned = sum(1 for e in snap if e['ready'] and e['people_scan'] != e['mtime'])
-            return {'people': out, 'status': dict(self.status), 'scan_all': self.scan_all, 'unscanned': unscanned,
-                    'items': len(snap)}
+            faces, face_count = {}, {}           # pid -> {uid: person index}, pid -> references
+            for r in self.refs:
+                faces.setdefault(r['pid'], {}).setdefault(r['uid'], r['pi'])
+                face_count[r['pid']] = face_count.get(r['pid'], 0) + 1
+            people = list(self.people.items())
+            status, scan_all = dict(self.status), self.scan_all
+        out = []
+        for pid, p in people:
+            mine = faces.get(pid, {})
+            if p['name']:
+                items = tagged.get(p['name'].lower(), [])
+                count, autos = len(items), auto.get(p['name'].lower(), 0)
+            else:
+                items = [by_uid[u] for u in mine if u in by_uid]
+                count, autos = len(items), 0
+            if not count and not p['name']:
+                continue
+            face_uid = next((u for u in mine if u in by_uid), None)
+            if face_uid:
+                cover = f"{MEDIA_URL}/{by_uid[face_uid]['vid']}/ai/face_{mine[face_uid] + 1}.jpg"
+            else:
+                cover = next((e['cover'] for e in items if e['cover']), None)
+            out.append({'id': pid, 'name': p['name'], 'label': self.label(p), 'num': p['num'], 'count': count,
+                        'auto': autos, 'cover': cover, 'faces': face_count.get(pid, 0)})
+        unscanned = sum(1 for e in snap if e['ready'] and e['people_scan'] != e['mtime'])
+        return {'people': out, 'status': status, 'scan_all': scan_all, 'unscanned': unscanned, 'items': len(snap)}
 
     def detail(self, pid: str) -> Optional[dict]:
         snap = self._snapshot()
