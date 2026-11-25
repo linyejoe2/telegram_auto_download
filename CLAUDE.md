@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (v3.6.0) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, per-file download records (hidden sidecars, no database, v3.3.0) for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
+This is a Telegram bot (v3.6.1) that automatically downloads media files from forwarded messages and their replies to the server for backup purposes. Features a professional GUI application with Windows installer, per-file download records (hidden sidecars, no database, v3.3.0) for download history and duplicate prevention, inline-keyboard folder navigation with path history, and uses both Telegram Bot API (python-telegram-bot) and Telegram Client API (Telethon) for comprehensive functionality.
 
 ## Development Commands
 
@@ -60,7 +60,8 @@ setup_build_env.bat
 ### Core Components
 
 ### GUI Application Components
-- **src/ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0, migrated to src/ in v1.3.0); has a "Web Library" tab to start/stop the web video library and set its port, access, startup and password (v3.0.0); Database tab has a "Clean Empty Files" button (`clean_empty_files()`: background scan via `DownloadRecords.empty_unsourced_files()`, shows count + first 15 paths, Yes/No confirm, background delete, reports deleted/failed, refreshes the list; v3.3.2)
+- **src/ui.py**: Main GUI application with tkinter interface and system tray integration (v1.0.0, migrated to src/ in v1.3.0); has a "Web Library" tab to start/stop the web video library and set its port, access, startup and password (v3.0.0); Database tab has a "Clean Empty Files" button (`clean_empty_files()`: background scan via `DownloadRecords.empty_unsourced_files()`, shows count + first 15 paths, Yes/No confirm, background delete, reports deleted/failed, refreshes the list; v3.3.2); "Diagnostics" tab (`setup_diagnostics_tab()`, v3.6.1): live table (every 2 s only while the tab is open, Live checkbox) of CPU per app thread / child process + summary line (% of one core and of the whole machine) + status lines per component (`_diagnostic_state()`: bot / web library / AI 辨識 / people database), `refresh_diagnostics()`, "Profile 10 s" (`run_profile()`, background thread) and "Dump Thread Stacks" (`dump_stacks()`), reports saved as `cpu_profile_<time>.txt` / `thread_stacks_<time>.txt` in `config.LOGS_DIR` and shown by `_show_report()` with Copy
+- **src/diagnostics.py** (v3.6.1): `CpuMonitor.sample()` (Windows Toolhelp32 thread / process snapshots + GetThreadTimes / GetProcessTimes via ctypes, no new dependency; kernel32 is loaded with `ctypes.PyDLL` on 64-bit so the calls keep the GIL, with `WinDLL` a busy Python thread made one sample take seconds; rows sorted by CPU, named Python threads / processes before native threads), `python_threads()`, `profile(seconds, hz, state)` (samples every Python thread's stack, 3 most common stacks per thread), `dump_stacks()`; live CPU is Windows only, the profile works everywhere
 - **src/chromium_helper.py**: Chromium check/install for screenshots (`check_chromium()`, `install_chromium()` via Playwright's bundled node driver, `ensure_browsers_path()` pins `PLAYWRIGHT_BROWSERS_PATH` to `%LOCALAPPDATA%\ms-playwright` on Windows, v2.5.0)
 - **src/auth_helper.py**: GUI and console authentication helper for Telethon client (v1.0.0)
 
@@ -88,7 +89,7 @@ setup_build_env.bat
 
 ### Windows Installer Components
 - **package_windows.bat**: Complete build automation script (v1.0.0)
-- **telegram_bot.spec**: PyInstaller configuration for executable creation (v1.0.0); v3.5.0: hiddenimport `library.recognize` and (v3.6.0) `library.people`, and `library/models` (face models, not in git) is added to `datas` only when it holds `.onnx` files
+- **telegram_bot.spec**: PyInstaller configuration for executable creation (v1.0.0); v3.5.0: hiddenimport `library.recognize` and (v3.6.0) `library.people`, (v3.6.1) `src.diagnostics`, and `library/models` (face models, not in git) is added to `datas` only when it holds `.onnx` files
 - **installer.iss**: Inno Setup installer configuration (v1.0.0)
 - **create_version_info.py**: Version information generator for Windows executable (v1.0.0)
 - **create_icon.py**: Application icon generator (v1.0.0)
@@ -263,7 +264,8 @@ telegram_auto_download/
 │   ├── auth_helper.py          # GUI/console authentication helper (197 lines, v1.0.0)
 │   ├── file_viewer.py          # /files chat file viewer (owner only, v2.7.0; folder video preview v2.7.1)
 │   ├── chromium_helper.py      # Chromium check/install for screenshots (v2.5.0)
-│   ├── ui.py                   # Main GUI application (tkinter interface, v1.3.0)
+│   ├── ui.py                   # Main GUI application (tkinter interface, v1.3.0; Diagnostics tab v3.6.1)
+│   ├── diagnostics.py          # CPU per thread / child process, 10 s stack profile, thread dump for the Diagnostics tab (v3.6.1)
 │   └── telegram_bot.py.bak     # Original monolithic file (backup)
 ├── web/
 │   ├── __init__.py
@@ -292,7 +294,7 @@ telegram_auto_download/
 ├── main.py                     # Unified application entry point (CLI/GUI)
 ├── package_windows.bat         # Windows installer build script (v1.0.0)
 ├── setup_build_env.bat         # Build environment setup script
-├── telegram_bot.spec           # PyInstaller configuration (v1.0.0; v3.5.0 bundles library/models when present; v3.6.0 hiddenimport library.people)
+├── telegram_bot.spec           # PyInstaller configuration (v1.0.0; v3.5.0 bundles library/models when present; v3.6.0 hiddenimport library.people; v3.6.1 hiddenimport src.diagnostics)
 ├── installer.iss               # Inno Setup installer configuration (v1.0.0)
 ├── create_version_info.py      # Version info generator (v1.0.0)
 ├── create_icon.py              # Application icon generator (v1.0.0)

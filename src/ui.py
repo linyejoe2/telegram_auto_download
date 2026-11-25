@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings, get_ai_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.6.0"
+        self.version = "v3.6.1"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -104,6 +104,12 @@ class TelegramBotGUI:
         web_frame = ttk.Frame(notebook)
         notebook.add(web_frame, text="Web Library")
         self.setup_web_tab(web_frame)
+
+        # Diagnostics: what uses the CPU (src/diagnostics.py)
+        self.notebook = notebook
+        self.diag_frame = ttk.Frame(notebook)
+        notebook.add(self.diag_frame, text="Diagnostics")
+        self.setup_diagnostics_tab(self.diag_frame)
 
     def setup_config_tab(self, parent):
         """Setup configuration tab with bot control at top"""
@@ -449,6 +455,150 @@ class TelegramBotGUI:
     def open_web(self):
         import webbrowser
         webbrowser.open(self._web_urls()[0])
+
+    # ---------------------- diagnostics ----------------------
+    def setup_diagnostics_tab(self, parent):
+        """Live CPU per thread / child process + app state, a 10 s profile report and a stack dump."""
+        from . import diagnostics
+        self.diag = diagnostics
+        self.diag_monitor = diagnostics.CpuMonitor()
+
+        top = ttk.LabelFrame(parent, text="CPU usage", padding="10")
+        top.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.diag_summary = ttk.Label(top, wraplength=740, justify=tk.LEFT,
+                                      text="Measuring…" if diagnostics.IS_WINDOWS else
+                                      "Live CPU per thread is only available on Windows (the profile still works)")
+        self.diag_summary.pack(anchor=tk.W)
+        self.diag_live_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(top, text="Live (updates every 2 s while this tab is open; CPU % = share of one core)",
+                        variable=self.diag_live_var).pack(anchor=tk.W, pady=(2, 0))
+
+        columns = ("CPU", "Kind", "Name", "Total")
+        tree_frame = ttk.Frame(top)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        self.diag_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=10)
+        for col, width, anchor in (("CPU", 70, tk.E), ("Kind", 70, tk.W), ("Name", 450, tk.W), ("Total", 100, tk.E)):
+            self.diag_tree.heading(col, text={"CPU": "CPU %", "Total": "Total CPU (s)"}.get(col, col))
+            self.diag_tree.column(col, width=width, anchor=anchor, stretch=(col == "Name"))
+        scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.diag_tree.yview)
+        self.diag_tree.configure(yscrollcommand=scroll.set)
+        self.diag_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.diag_state = ttk.Label(top, text="", justify=tk.LEFT, foreground="gray25", wraplength=740)
+        self.diag_state.pack(anchor=tk.W, pady=(4, 0))
+
+        buttons = ttk.Frame(parent)
+        buttons.pack(fill=tk.X, padx=10, pady=5)
+        self.diag_profile_button = ttk.Button(buttons, text="Profile 10 s", command=self.run_profile)
+        self.diag_profile_button.pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons, text="Dump Thread Stacks", command=self.dump_stacks).pack(side=tk.LEFT, padx=5)
+        ttk.Label(buttons, foreground="gray", text="Reports are saved in the logs folder").pack(side=tk.LEFT, padx=10)
+        self.root.after(1000, self.refresh_diagnostics)
+
+    def _diagnostic_state(self) -> str:
+        """One line per component: is it running, is it busy."""
+        lines = []
+        bot_tasks = '-'
+        if self.bot_running and self.bot_loop:
+            try:
+                bot_tasks = len(asyncio.all_tasks(self.bot_loop))
+            except Exception:
+                pass
+        lines.append(f"Bot: {'running' if self.bot_running else 'stopped'} (asyncio tasks: {bot_tasks})")
+        server = self.web_server
+        if not server:
+            lines.append("Web library: stopped")
+            return '\n'.join(lines)
+        lib = server.library
+        web_tasks = '-'
+        try:
+            web_tasks = len(asyncio.all_tasks(server._loop))
+        except Exception:
+            pass
+        lines.append(f"Web library: running, {len(lib.entries)} items, {lib.processing} being processed "
+                     f"(info / screenshots), {lib.deferred} still being written, similarity check "
+                     f"{'done' if lib.matching_ready else 'running'} (asyncio tasks: {web_tasks})")
+        try:
+            jobs = server.recognizer.jobs()
+            running = [j for j in jobs if j['status'] == 'running']
+            queued = sum(1 for j in jobs if j['status'] == 'queued')
+            lines.append("AI 辨識: " + (f"running {running[0]['title']} ({(running[0].get('progress') or {}).get('phase', '')})"
+                                        if running else "idle") + (f", {queued} queued" if queued else ""))
+        except Exception as e:
+            lines.append(f"AI 辨識: {e}")
+        people = getattr(server, 'people', None)
+        if people:
+            s = people.status
+            busy = {'sync': 'building from 主演 tags', 'scan': 'recognising items'}.get(s.get('phase'))
+            lines.append("People database: " + (f"{busy} {s.get('done')}/{s.get('total')}" if busy else "idle")
+                         + (", scan-all on" if people.scan_all else "") + (f", error: {s['error']}" if s.get('error') else ""))
+        return '\n'.join(lines)
+
+    def refresh_diagnostics(self):
+        try:
+            visible = self.notebook.select() == str(self.diag_frame)
+            if visible and self.diag_live_var.get():
+                data = self.diag_monitor.sample()
+                if data and data.get('ready'):
+                    self.diag_summary.config(text=(
+                        f"Process {data['process']:.1f} % of one core + child processes {data['children']:.1f} %"
+                        f"  =  {data['machine']:.1f} % of the whole machine ({data['cores']} cores, Task Manager)"
+                        f"  ·  {data['threads']} threads"))
+                    self.diag_tree.delete(*self.diag_tree.get_children())
+                    for r in data['rows'][:60]:
+                        self.diag_tree.insert("", "end", values=(f"{r['cpu']:.1f}", r['kind'], r['name'], f"{r['total']:.1f}"))
+                self.diag_state.config(text=self._diagnostic_state())
+            elif not visible:
+                self.diag_monitor = self.diag.CpuMonitor()      # start fresh when the tab opens again
+        except Exception as e:
+            logging.debug(f"Diagnostics refresh failed: {e}")
+        self.root.after(2000, self.refresh_diagnostics)
+
+    def _show_report(self, title, text, prefix):
+        """Save the text in the logs folder and show it in a window with Copy."""
+        path = None
+        try:
+            os.makedirs(bot_config.LOGS_DIR, exist_ok=True)
+            path = os.path.join(bot_config.LOGS_DIR, f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}.txt")
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            logging.info(f"Diagnostics report saved: {path}")
+        except OSError as e:
+            logging.warning(f"Could not save the report: {e}")
+        window = tk.Toplevel(self.root)
+        window.title(title)
+        window.geometry("900x600")
+        box = scrolledtext.ScrolledText(window, wrap=tk.NONE, font=("Consolas", 9))
+        box.pack(fill=tk.BOTH, expand=True)
+        box.insert(tk.END, text)
+        bar = ttk.Frame(window)
+        bar.pack(fill=tk.X)
+        def copy():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+        ttk.Button(bar, text="Copy", command=copy).pack(side=tk.LEFT, padx=5, pady=5)
+        if path:
+            ttk.Label(bar, text=f"Saved: {path}").pack(side=tk.LEFT, padx=10)
+
+    def run_profile(self):
+        self.diag_profile_button.config(state=tk.DISABLED, text="Profiling… (10 s)")
+        state = self._diagnostic_state()
+
+        def work():
+            try:
+                text = self.diag.profile(10, state=state)
+            except Exception as e:
+                text = f"Profile failed: {e}"
+            def done():
+                self.diag_profile_button.config(state=tk.NORMAL, text="Profile 10 s")
+                self._show_report("CPU Profile", text, "cpu_profile")
+            self.root.after(0, done)
+
+        threading.Thread(target=work, daemon=True, name='diagnostics-profile').start()
+
+    def dump_stacks(self):
+        self._show_report("Thread Stacks", self._diagnostic_state() + "\n\n" + self.diag.dump_stacks(), "thread_stacks")
 
     def setup_log_tab(self, parent):
         """Setup logs tab"""

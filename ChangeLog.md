@@ -1,5 +1,10 @@
 # ChangeLog
 
+## [3.6.1] - 2026-11-25 - Diagnostics Tab
+### Added
+- Windows app Diagnostics tab to find what uses the CPU when the app seems idle: live table (2 s, only while the tab is open) of CPU per thread (Python threads by name, native threads as "native thread <id>") and per child process (ffmpeg, node …), a machine-wide summary, and status lines for bot / web library / AI 辨識 / people database (`src/ui.py` `setup_diagnostics_tab()`, `_diagnostic_state()`)
+- "Profile 10 s" (stack sampling at 100 Hz + CPU by thread / process) and "Dump Thread Stacks", saved as `cpu_profile_<time>.txt` / `thread_stacks_<time>.txt` in the logs folder and shown with Copy; new `src/diagnostics.py` (`CpuMonitor`, `profile()`, `dump_stacks()`; Windows API via ctypes, no new dependency); `telegram_bot.spec` hiddenimport `src.diagnostics`
+
 ## [3.6.0] - 2026-11-25 - People Database
 ### Added
 - Web library 人物資料庫 behind the 主演 tags (`library/people.py` `People`, background thread): named people are built from the tags (the tagged item's matching face becomes a reference); new items are recognised once their screenshots are ready, a face matching a named person gets that 主演 tag automatically (`auto_actors`), unknown faces are collected as 未命名人物; existing items only after 「🔍 掃描全部未掃描的項目」; stored in `<downloads>/.tad/people.json` + `people.npy`

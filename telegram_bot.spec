@@ -124,6 +124,7 @@ hiddenimports = [
     'library.recognize',
     'library.people',
     'src.video_loader',
+    'src.diagnostics',
 
     # custom
     'imagehash',
