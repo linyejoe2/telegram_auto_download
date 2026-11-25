@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, baseName, KINDS, parentOf, qualityKey, rememberKind, saveList, storedKind } from '../api.js'
+import { api, baseName, KINDS, parentOf, qualityKey, readSession, rememberKind, saveList, storedKind, writeSession } from '../api.js'
 import VideoCard, { VideoRow } from '../components/VideoCard.jsx'
 import FolderTree from '../components/FolderTree.jsx'
 import AppMenu from '../components/AppMenu.jsx'
@@ -387,6 +387,38 @@ export default function Library({ guard, onLogout }) {
     for (const v of Object.values(best)) items.push({ ...v, versions: groupSize[v.group] })
     return items.sort(SORTS[sort]?.fn || SORTS.added.fn)
   }, [videos, q, actor, series, folder, sort])
+
+  // Scroll position per view (folder / filters / sort = the query string), kept for this tab: coming back
+  // from a video or reloading puts the list where it was. Restored once, after the list has rendered;
+  // nothing is saved before that (the short 載入中… page would scroll to 0 and overwrite it).
+  const scrollKey = `tad.scroll:${params.toString()}`
+  const restored = useRef(false)
+  useEffect(() => {
+    if (restored.current || videos === null) return
+    restored.current = true
+    const y = Number(readSession(scrollKey)) || 0
+    if (y > 0) requestAnimationFrame(() => window.scrollTo(0, y))
+  }, [videos])
+  // layout effect: its cleanup runs before the next page replaces the list, so that page's scroll isn't saved
+  useLayoutEffect(() => {
+    let timer = null
+    let last = null
+    const save = () => {
+      if (!restored.current) return
+      last = window.scrollY
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        writeSession(scrollKey, last)
+        last = null
+      }, 150)
+    }
+    window.addEventListener('scroll', save, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', save)
+      clearTimeout(timer)
+      if (last !== null) writeSession(scrollKey, last) // the last scroll before leaving
+    }
+  }, [scrollKey])
 
   // the video page swipes through the videos in this order (same filters / sort, a group once)
   useEffect(() => {

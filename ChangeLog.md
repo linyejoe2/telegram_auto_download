@@ -1,5 +1,11 @@
 # ChangeLog
 
+## [3.4.9] - 2026-11-25 - Remember Library Position
+### Added
+- Web library page remembers its scroll position per view (folder / search / filters / sort / kind) in this tab: going back from a video or reloading the page returns to where you were once the list has loaded; the video page now opens at the top (`Library.jsx`, `VideoPage.jsx`, `main.jsx`, `api.js` `readSession()` / `writeSession()`)
+### Fixed
+- Reloading the library page lost the folder, filters and sort: the server's `/library` redirect to `/library/` dropped the query string (`library/server.py` `LibraryServer.to_app`), it now keeps it
+
 ## [3.4.8] - 2026-11-25 - Enhanced Compare
 ### Added
 - Web library 🔬 加強比對 for exactly two selected videos (bottom bar button and right-click item, enabled only when 2 videos are selected, started by hand only): for copies with a cut start / end or a scaled / cropped / letterboxed picture that the normal screenshot check scores low (`library/deep_compare.py` `compare()`, `Library.deep_compare()`, `POST /library/api/batch/deep-compare`, `similarity.ssim_map()`)

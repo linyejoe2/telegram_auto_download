@@ -57,6 +57,12 @@ export default function VideoPage({ guard, onLogout }) {
     [video?.id, location.state?.back],
   )
 
+  // opened from a scrolled list: start at the top (block body: newer browsers return a Promise from
+  // scrollTo, which React would take for the cleanup function)
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
+
   async function load() {
     try {
       const v = await api.video(id)

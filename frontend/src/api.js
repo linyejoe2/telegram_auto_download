@@ -94,6 +94,21 @@ export function rememberKind(kind) {
 
 export const dimensions = (w, h) => (w && h ? `${w}×${h}` : null)
 
+// sessionStorage (this tab, survives reloads); can be blocked, so never required
+export function readSession(key) {
+  try {
+    return sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+export function writeSession(key, value) {
+  try {
+    sessionStorage.setItem(key, String(value))
+  } catch {}
+}
+
 // The library's current video order (this tab only), so the video page can swipe to the previous /
 // next one. `back` is the library's query string: the list is used only when the page was opened from
 // that view. Items are [id, group] so another version of a shown video finds its place too.

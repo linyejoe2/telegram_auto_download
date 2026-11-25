@@ -469,7 +469,9 @@ class LibraryServer:
         return web.Response(text='', content_type='text/html')
 
     async def to_app(self, request: web.Request):
-        raise web.HTTPFound(PREFIX + '/')
+        # keep the query: the router writes the library page as /library?folder=… (reload must keep the filters)
+        query = request.query_string
+        raise web.HTTPFound(PREFIX + '/' + (f'?{query}' if query else ''))
 
     async def frontend(self, request: web.Request):
         root = static_dir()
