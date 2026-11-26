@@ -8,6 +8,7 @@ import History from './pages/History.jsx'
 import Settings from './pages/Settings.jsx'
 import Recognition from './pages/Recognition.jsx'
 import People, { PersonPage } from './pages/People.jsx'
+import Classifier from './pages/Classifier.jsx'
 
 export default function App() {
   const [authed, setAuthed] = useState(null) // null = checking
@@ -34,6 +35,7 @@ export default function App() {
       <Route path="/history" element={<History guard={guard} onLogout={onLogout} />} />
       <Route path="/settings" element={<Settings onLogout={onLogout} />} />
       <Route path="/recognition" element={<Recognition guard={guard} onLogout={onLogout} />} />
+      <Route path="/classify" element={<Classifier guard={guard} onLogout={onLogout} />} />
       <Route path="/people" element={<People guard={guard} onLogout={onLogout} />} />
       <Route path="/people/:id" element={<PersonPage guard={guard} onLogout={onLogout} />} />
       <Route path="*" element={<Library guard={guard} onLogout={onLogout} />} />

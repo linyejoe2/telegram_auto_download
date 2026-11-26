@@ -10,6 +10,7 @@ import { api } from '../api.js'
 const PAGES = [
   { path: '/', icon: '🎬', label: '媒體庫', hint: '影片與圖片' },
   { path: '/history', icon: '📜', label: '下載紀錄', hint: '所有下載過的檔案，已刪除的可重新下載' },
+  { path: '/classify', icon: '🗂', label: '分類器', hint: '把未分類的項目拖進系列、系列改名' },
   { path: '/people', icon: '👥', label: '人物', hint: '人臉資料庫：命名、合併，新影片自動加主演' },
   { path: '/recognition', icon: '🤖', label: 'AI 辨識', hint: '辨識主演 / 系列的進度與結果' },
   { path: '/settings', icon: '⚙', label: '設定', hint: '預設播放畫質、全螢幕' },

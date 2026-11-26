@@ -238,6 +238,23 @@ export default function Library({ guard, onLogout }) {
     })
   }
 
+  function renameSeries(name) {
+    setDialog({
+      title: '修改系列名稱',
+      label: `「${name}」的所有項目都會改成新名稱；改成已有的系列名稱會把兩個系列合併`,
+      initial: name,
+      confirmText: '修改',
+      onSubmit: async (value) => {
+        if (value === name) return setDialog(null)
+        const result = await api.renameSeries(name, value)
+        setDialog(null)
+        notify(`已把 ${result.updated} 個項目的系列改為「${result.name}」`)
+        await load()
+        setParam('series', result.name)
+      },
+    })
+  }
+
   async function deleteFolder(path) {
     if (!window.confirm(`確定要刪除空資料夾「${baseName(path)}」嗎？`)) return
     await act(() => api.deleteFolder(path), '已刪除資料夾')
@@ -735,6 +752,20 @@ export default function Library({ guard, onLogout }) {
                 <option key={s.name} value={s.name}>{`${s.name} (${s.count})`}</option>
               ))}
             </Select>
+            {series && (
+              <button
+                onClick={() => renameSeries(series)}
+                className="flex items-center gap-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm hover:bg-neutral-700"
+                title={`修改系列名稱「${series}」`}
+                aria-label="修改系列名稱"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+                改名
+              </button>
+            )}
             <Select label="排序" value={sort} onChange={(v) => setSort(v)}>
               {Object.entries(SORTS).map(([k, s]) => (
                 <option key={k} value={k}>{s.label}</option>

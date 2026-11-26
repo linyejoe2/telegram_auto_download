@@ -1,5 +1,13 @@
 # ChangeLog
 
+## [3.7.0] - 2026-11-26 - Series Classifier
+### Added
+- New 🗂 分類器 page `/classify` in the ☰ menu (`Classifier.jsx`, `App.jsx`, `AppMenu.jsx`): top 1/4 = 系列 as folder-style cards (2x2 covers, name, count; one row scrolled with the mouse wheel; 主演 filter `?actor=`, series search `?sq=`, 「＋ 新系列」), bottom 3/4 = items without a 系列 (影片 / 圖片 / 全部, search, 「只顯示「X」的項目」)
+- Drag one item, a selection or a drag-select box onto a series card (or click the card with items selected, or 「＋ 新系列」 / 加入新系列 to name a new one) to set its 系列 via `api.batchUpdate`; the toast has 復原; ✎ / right-click renames a series (an existing name merges); click a card or double-click an item opens it in the library / item page
+- Rename a series on the library page: 「✎ 改名」 beside the 系列 filter (`Library.rename_series()` in `store.py`, `POST /library/api/series/rename`, `api.renameSeries()`); the filter follows the new name
+### Fixed
+- Library routes answered 200 with `null` instead of the error when a request was refused (e.g. a bad folder name showed 「已重新命名」): aiohttp's `Response` is falsy, so `error or web.json_response(...)` always returned the success response; now `error if error is not None else ...` in every `_run` route (`server.py`)
+
 ## [3.6.3] - 2026-11-25 - Thread Limit & New Sorts
 ### Added
 - Windows app Configuration tab "Performance" > "Max CPU threads" (`MAX_THREADS`, default 16, at most the PC's cores): ffmpeg (screenshots, live transcode, face-recognition frames, deep compare, 載入影片 compression), OpenCV, numpy and the worker pools use at most that many threads (`config.get_max_threads()` / `apply_thread_limit()`, `media.thread_limit()` / `threads_args()`, `src/ui.py`, `main.py`)

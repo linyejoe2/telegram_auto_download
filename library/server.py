@@ -123,6 +123,7 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/videos/{id}/ungroup', self.ungroup_video)
         r.add_post(PREFIX + '/api/videos/{id}/redownload', self.redownload_video)
         r.add_post(PREFIX + '/api/move', self.move)
+        r.add_post(PREFIX + '/api/series/rename', self.rename_series)
         r.add_post(PREFIX + '/api/batch/update', self.batch_update)
         r.add_post(PREFIX + '/api/batch/delete', self.batch_delete)
         r.add_post(PREFIX + '/api/batch/compare', self.batch_compare)
@@ -300,27 +301,27 @@ class LibraryServer:
 
     async def list_folders(self, request: web.Request):
         folders, error = await self._run(self.library.folders)
-        return error or web.json_response({'folders': folders})
+        return error if error is not None else web.json_response({'folders': folders})
 
     async def create_folder(self, request: web.Request):
         body = await self._body(request)
         path, error = await self._run(self.library.create_folder, body.get('parent', ''), body.get('name', ''))
-        return error or web.json_response({'path': path})
+        return error if error is not None else web.json_response({'path': path})
 
     async def rename_folder(self, request: web.Request):
         body = await self._body(request)
         path, error = await self._run(self.library.rename_folder, body.get('path', ''), body.get('name', ''))
-        return error or web.json_response({'path': path})
+        return error if error is not None else web.json_response({'path': path})
 
     async def delete_folder(self, request: web.Request):
         body = await self._body(request)
         _, error = await self._run(self.library.delete_folder, body.get('path', ''))
-        return error or web.json_response({'ok': True})
+        return error if error is not None else web.json_response({'ok': True})
 
     async def rename_video(self, request: web.Request):
         body = await self._body(request)
         vid, error = await self._run(self.library.rename_video, request.match_info['id'], body.get('name', ''))
-        return error or web.json_response({'id': vid})
+        return error if error is not None else web.json_response({'id': vid})
 
     async def ungroup_video(self, request: web.Request):
         data, error = await self._run(self.library.ungroup, request.match_info['id'])
@@ -333,11 +334,20 @@ class LibraryServer:
         videos = [str(v) for v in body.get('videos') or [] if isinstance(v, str)]
         folders = [str(f) for f in body.get('folders') or [] if isinstance(f, str)]
         result, error = await self._run(self.library.move, videos, folders, body.get('dest', ''))
-        return error or web.json_response(result)
+        return error if error is not None else web.json_response(result)
 
     @staticmethod
     def _strings(value) -> list:
         return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+    async def rename_series(self, request: web.Request):
+        """Rename a 系列 on every item: {old, new} -> {updated, name} (an existing name merges)."""
+        body = await self._body(request)
+        old, new = body.get('old'), body.get('new')
+        if not isinstance(old, str) or not isinstance(new, str):
+            return web.json_response({'error': '缺少系列名稱'}, status=400)
+        result, error = await self._run(self.library.rename_series, old, new)
+        return error if error is not None else web.json_response(result)
 
     async def batch_update(self, request: web.Request):
         """Multi-select edit: {ids, add_actors, remove_actors, series?} (series '' clears, absent = unchanged)."""
@@ -349,7 +359,7 @@ class LibraryServer:
         result, error = await self._run(self.library.update_many, ids, self._strings(body.get('add_actors')),
                                         self._strings(body.get('remove_actors')),
                                         series if isinstance(series, str) else None)
-        return error or web.json_response(result)
+        return error if error is not None else web.json_response(result)
 
     async def batch_delete(self, request: web.Request):
         """Multi-select delete: {ids} -> {deleted, failed: [{name, error}]}."""
@@ -358,7 +368,7 @@ class LibraryServer:
         if not ids:
             return web.json_response({'error': '沒有選取任何項目'}, status=400)
         result, error = await self._run(self.library.delete_many, ids)
-        return error or web.json_response(result)
+        return error if error is not None else web.json_response(result)
 
     async def batch_compare(self, request: web.Request):
         """Multi-select 「嘗試合併」 step 1 (changes nothing): {ids} -> {items, pairs: [[id, id, score]], photos, threshold}."""
@@ -367,7 +377,7 @@ class LibraryServer:
         if len(ids) < 2:
             return web.json_response({'error': '請至少選取兩部影片'}, status=400)
         result, error = await self._run(self.library.compare_many, ids)
-        return error or web.json_response(result)
+        return error if error is not None else web.json_response(result)
 
     async def deep_compare(self, request: web.Request):
         """加強比對 of exactly two videos: {ids: [a, b]} -> score, offset, scale, previews… (takes seconds to minutes)."""
@@ -376,7 +386,7 @@ class LibraryServer:
         if len(ids) != 2:
             return web.json_response({'error': '加強比對只能選兩部影片'}, status=400)
         result, error = await self._run(self.library.deep_compare, ids[0], ids[1])
-        return error or web.json_response(result)
+        return error if error is not None else web.json_response(result)
 
     async def batch_merge(self, request: web.Request):
         """Multi-select 「嘗試合併」 step 2: {groups: [[id, ...], ...]} -> {groups: [{title, versions}]}."""
@@ -385,7 +395,7 @@ class LibraryServer:
         if not groups:
             return web.json_response({'error': '沒有要合併的影片'}, status=400)
         result, error = await self._run(self.library.join_groups, groups)
-        return error or web.json_response(result)
+        return error if error is not None else web.json_response(result)
 
     # ── AI 辨識 (library/recognize.py) ──
 

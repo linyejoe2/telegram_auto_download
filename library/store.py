@@ -466,6 +466,25 @@ class Library:
                 changed += 1
         return changed
 
+    def rename_series(self, old: str, new: str) -> dict:
+        """Rename a 系列 on every item that has it (an existing name merges the two); returns {updated, name}."""
+        old, new = str(old or '').strip(), str(new or '').strip()[:200]
+        if not old:
+            raise LibraryError('沒有指定系列', 400)
+        if not new:
+            raise LibraryError('請輸入新的系列名稱', 400)
+        updated = 0
+        with self._lock:
+            for vid, entry in list(self.entries.items()):
+                if (entry['meta'].get('series') or '') == old:
+                    if new != old:
+                        self._apply(vid, {'series': new})
+                    updated += 1
+        if not updated:
+            raise LibraryError(f'找不到系列「{old}」', 404)
+        logger.info(f"影片庫：系列「{old}」改名為「{new}」（{updated} 個項目）")
+        return {'updated': updated, 'name': new}
+
     def delete(self, vid: str) -> bool:
         with self._lock:
             entry = self.entries.get(vid)
