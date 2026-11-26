@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.7.2
+# Telegram Auto Download Bot v3.8.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, download-record tracking, and real-time progress.
 
@@ -56,13 +56,16 @@ The Diagnostics tab (v3.6.1) shows live CPU use per thread and child process and
 - **Hover preview & resizable classifier (v3.7.1)**  
   Rest the mouse on a video card for 1 s (library or 分類器) to play a short muted preview clip; it is made on first use and cached beside the screenshots. The 分類器 divider between the series and the unclassified items can be dragged (double-click resets) and bigger series albums show more covers.
 
+- **Classifier Canvas (v3.8.0)**  
+  The 分類器's unclassified items are now a free canvas: every item shows its whole picture (portrait videos are no longer cropped) in neat rows. Drag items anywhere or onto a series, drag on empty space to box-select, scroll to pan, Shift + scroll or pinch to zoom (10 %–400 %), and use 「排列」 (最新加入 / 依標題) to tidy everything up again.
+
 ---
 
 ## 🚀 Quick Start
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.7.2.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.8.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)

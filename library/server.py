@@ -95,6 +95,7 @@ class LibraryServer:
         self._streams = []                               # live transcodes: {proc, viewer, stopped?}
         self._preview_locks = {}                         # video id -> asyncio.Lock while its preview clip is made
         self._preview_slots = asyncio.Semaphore(2)       # preview clips made at the same time
+        self._preview_failed = set()                     # (path, mtime) whose preview clip could not be made
         self.library.on_change = self.people.wake
         self.recognizer.people = self.people            # AI 辨識 reuses the database's 主演 faces
         # download a deleted file again through the running bot: returns an error text or None
@@ -574,6 +575,12 @@ class LibraryServer:
         headers = {'Cache-Control': 'private, no-cache'}
         ready = media.fresh_preview(path)
         if not ready:
+            try:
+                stamp = (path, os.path.getmtime(path))
+            except OSError:
+                raise web.HTTPNotFound()
+            if stamp in self._preview_failed:     # failed before: don't run ffmpeg again on every hover
+                raise web.HTTPNotFound()
             lock = self._preview_locks.setdefault(vid, asyncio.Lock())
             async with lock:                  # the same video hovered twice: made once
                 ready = media.fresh_preview(path)
@@ -582,7 +589,8 @@ class LibraryServer:
                         try:
                             ready = await asyncio.get_running_loop().run_in_executor(None, media.make_preview, path, duration)
                         except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-                            logger.info(f"影片庫：{e}（{os.path.basename(path)}）")
+                            self._preview_failed.add(stamp)   # until the file changes or the server restarts
+                            logger.warning(f"影片庫：{e}（{os.path.basename(path)}）")
                             raise web.HTTPNotFound()
             self._preview_locks.pop(vid, None)
         return web.FileResponse(ready, headers=headers)

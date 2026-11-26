@@ -6,7 +6,7 @@ import { dimensions, fmtBitrate, fmtDuration, fmtSize, MEDIA, releaseVideo, reso
 // from across the video, made by the server on the first request and kept; library/media.py make_preview)
 const HOVER_DELAY = 1000
 
-function useHoverPreview(video) {
+export function useHoverPreview(video) {
   const [on, setOn] = useState(false)
   const timer = useRef(null)
   const usable = video.kind !== 'photo' && video.ready && !video.error
@@ -33,7 +33,8 @@ function useHoverPreview(video) {
   }
 }
 
-function PreviewVideo({ id }) {
+// contain: the whole picture (分類器 canvas); otherwise it fills the cover like the screenshot
+export function PreviewVideo({ id, contain = false }) {
   const ref = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -56,7 +57,7 @@ function PreviewVideo({ id }) {
         onLoadedData={(e) => e.currentTarget.play().catch(() => {})}
         onPlaying={() => setPlaying(true)}
         onError={() => setFailed(true)}
-        className={`pointer-events-none absolute inset-0 h-full w-full bg-black object-cover transition-opacity duration-300 ${playing ? 'opacity-100' : 'opacity-0'}`}
+        className={`pointer-events-none absolute inset-0 h-full w-full bg-black ${contain ? 'object-contain' : 'object-cover'} transition-opacity duration-300 ${playing ? 'opacity-100' : 'opacity-0'}`}
       />
       {!playing && (
         <span aria-hidden className="pointer-events-none absolute bottom-1.5 right-1.5 h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -109,8 +110,7 @@ function Check({ on, className = '' }) {
 
 // the cover stays clean (only the select check in select mode); length, resolution and versions go
 // under the title
-// compact (small cards in the 分類器): only a one-line title under the cover
-export default function VideoCard({ video, search, onMenu, selecting, selected, onSelect, dragIds, compact = false }) {
+export default function VideoCard({ video, search, onMenu, selecting, selected, onSelect, dragIds }) {
   const photo = video.kind === 'photo'
   const meta = [
     photo ? dimensions(video.width, video.height) : video.duration != null && fmtDuration(video.duration),
@@ -125,7 +125,7 @@ export default function VideoCard({ video, search, onMenu, selecting, selected, 
       aria-selected={selecting ? !!selected : undefined}
       {...itemProps(video, { onMenu, selecting, onSelect, dragIds })}
       {...preview.handlers}
-      className={`group block overflow-hidden ${compact ? 'rounded-lg' : 'rounded-xl'} bg-neutral-900 ring-1 transition ${
+      className={`group block overflow-hidden rounded-xl bg-neutral-900 ring-1 transition ${
         selected ? 'ring-2 ring-accent' : 'ring-white/5 hover:ring-accent/60'
       }`}
     >
@@ -144,18 +144,14 @@ export default function VideoCard({ video, search, onMenu, selecting, selected, 
           </div>
         )}
         {preview.on && <PreviewVideo id={video.id} />}
-        {selecting && <Check on={selected} className={compact ? 'absolute left-1 top-1 h-5 w-5 text-xs' : 'absolute left-2 top-2'} />}
+        {selecting && <Check on={selected} className="absolute left-2 top-2" />}
       </div>
-      {compact ? (
-        <p className="truncate px-2 py-1 text-xs" title={video.title}>{video.title}</p>
-      ) : (
       <div className="space-y-1 p-3">
         <h3 className="line-clamp-2 text-sm font-medium leading-snug" title={video.title}>{video.title}</h3>
         {meta.length > 0 && <p className="truncate text-xs tabular-nums text-neutral-500">{meta.join(' · ')}</p>}
         {video.series && <p className="truncate text-xs text-accent">{video.series}</p>}
         {video.actors.length > 0 && <p className="truncate text-xs text-neutral-400">{video.actors.join('、')}</p>}
       </div>
-      )}
     </Link>
   )
 }

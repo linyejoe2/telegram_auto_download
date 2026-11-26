@@ -1,22 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, DRAG_TYPE, getDragItems, KINDS, qualityKey } from '../api.js'
-import VideoCard from '../components/VideoCard.jsx'
+import { api, KINDS, qualityKey } from '../api.js'
+import ClassifierCanvas, { CANVAS_ZOOM_MAX, CANVAS_ZOOM_MIN } from '../components/ClassifierCanvas.jsx'
 import AppMenu from '../components/AppMenu.jsx'
 import { ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
 
 // 分類器: put items into 系列 by drag & drop. Top quarter: the series as folder-like cards (a 2×2 of
 // covers, scrolls sideways; picking a 主演 shows only that actor's series), each one a drop target; bottom
-// three quarters: items without a 系列 (they leave the list once they get one).
+// three quarters: items without a 系列 on a canvas (ClassifierCanvas.jsx; they leave it once they get one).
 
 const byAdded = (a, b) => (b.added || 0) - (a.added || 0)
-
-// card width of the 未分類 list (Shift + wheel / the slider), remembered per browser
-const ZOOM_MIN = 90
-const ZOOM_MAX = 360
-const ZOOM_DEFAULT = 240
-const COMPACT_BELOW = 170 // smaller cards show only the title
-const clampZoom = (n) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(n)))
 
 // share of the page the series get (the divider), remembered per browser
 const SPLIT_DEFAULT = 0.25
@@ -29,14 +22,6 @@ function readSplit() {
     return clampSplit(Number(localStorage.getItem('tad.classifySplit')) || SPLIT_DEFAULT)
   } catch {
     return SPLIT_DEFAULT
-  }
-}
-
-function readZoom() {
-  try {
-    return clampZoom(Number(localStorage.getItem('tad.classifyZoom')) || ZOOM_DEFAULT)
-  } catch {
-    return ZOOM_DEFAULT
   }
 }
 
@@ -56,16 +41,13 @@ function collapse(list, all) {
 
 // size = the album's side in px, from the top section's height (drag the divider): bigger albums show
 // more covers (2×2, 3×3, 4×4) so the items of a series can be compared
-function SeriesCard({ name, items, size, over, picked, onDrop, onDragOver, onDragLeave, onClick, onMenu, onRename }) {
+function SeriesCard({ name, items, size, over, picked, onClick, onMenu, onRename }) {
   // as many columns as the size allows, but no empty rows: 6 items -> 3×3, not 4×4
   const cols = Math.min(size < 200 ? 2 : size < 360 ? 3 : 4, Math.max(2, Math.ceil(Math.sqrt(items.length))))
   const covers = items.slice(0, cols * cols)
   return (
     <div
       data-series={name}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
       onClick={onClick}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -128,11 +110,9 @@ export default function Classifier({ guard, onLogout }) {
   const toastTimer = useRef(null)
   const anchor = useRef(null)
   const strip = useRef(null)
-  const listEl = useRef(null)
-  const boxEl = useRef(null)
-  const ghost = useRef(null)
-  const [zoom, setZoom] = useState(readZoom)
-  const scrollRatio = useRef(null) // keeps the list's place while the cards change size
+  const canvas = useRef(null)
+  const [canvasZoom, setCanvasZoom] = useState(1) // shown in the toolbar (the canvas keeps the real value)
+  const dropTarget = useRef(null) // series name / '+' under the pointer while items are dragged
   const page = useRef(null)
   const [split, setSplit] = useState(readSplit) // top section's share of the page
   const [album, setAlbum] = useState(96) // series album side in px, follows the strip's height
@@ -184,6 +164,7 @@ export default function Classifier({ guard, onLogout }) {
   const sq = params.get('sq') || '' // series search
   const kind = KINDS[params.get('kind')] ? params.get('kind') : 'all'
   const onlyActor = params.get('mine') !== '0' // with a 主演 picked: only that actor's items below
+  const order = params.get('order') === 'title' ? 'title' : 'added' // 排列 order of the canvas
 
   function setParam(key, value) {
     const next = new URLSearchParams(params)
@@ -250,8 +231,11 @@ export default function Classifier({ guard, onLogout }) {
         (!actor || !onlyActor || v.actors.includes(actor)) &&
         (!needle || [v.title, v.file, v.folder, v.description, ...v.actors].some((s) => (s || '').toLowerCase().includes(needle))),
     )
-    return collapse(list, videos)
-  }, [videos, kind, actor, onlyActor, q])
+    const items = collapse(list, videos)
+    return order === 'title' ? items.sort((a, b) => a.title.localeCompare(b.title, 'zh-Hant', { numeric: true })) : items
+  }, [videos, kind, actor, onlyActor, q, order])
+  // the canvas is arranged again when these change (positions aren't kept)
+  const layoutKey = [kind, q, actor, onlyActor, order].join('|')
 
   // only what is on screen stays selected (items that got a series leave the list)
   const picked = useMemo(() => shown.filter((v) => selected.has(v.id)), [shown, selected])
@@ -319,25 +303,29 @@ export default function Classifier({ guard, onLogout }) {
 
   const openSeries = (name) => navigate(`/?series=${encodeURIComponent(name)}&kind=all`)
 
-  function dropProps(name) {
-    return {
-      onDragOver: (e) => {
-        if (!e.dataTransfer.types.includes(DRAG_TYPE)) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        setOver(name)
-      },
-      onDragLeave: (e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setOver((o) => (o === name ? null : o))
-      },
-      onDrop: (e) => {
-        e.preventDefault()
-        setOver(null)
-        const ids = getDragItems(e)?.videos || []
-        if (name === '+') newSeries(ids)
-        else addTo(name, ids)
-      },
+  // items dragged on the canvas: which series card / 「＋ 新系列」 is under the pointer (the strip scrolls
+  // near its ends); on release dropItems() adds them and tells the canvas not to keep the move
+  function dragAt(x, y) {
+    const el = document.elementFromPoint(x, y)
+    const card = el?.closest?.('[data-series], [data-new-series]')
+    const target = card ? (card.hasAttribute('data-new-series') ? '+' : card.dataset.series) : null
+    dropTarget.current = target
+    setOver(target)
+    const st = strip.current
+    const r = st.getBoundingClientRect()
+    if (y >= r.top && y <= r.bottom) {
+      if (x < r.left + 60) st.scrollLeft -= 16
+      else if (x > r.right - 60) st.scrollLeft += 16
     }
+  }
+
+  function dropItems(ids) {
+    const target = dropTarget.current
+    dropTarget.current = null
+    setOver(null)
+    if (target === '+') newSeries(ids)
+    else if (target) addTo(target, ids)
+    return Boolean(target)
   }
 
   // the strip scrolls sideways with the wheel (with or without Shift) and while dragging near its ends
@@ -353,56 +341,6 @@ export default function Classifier({ guard, onLogout }) {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [videos])
-
-  // ── card size: Shift + wheel over the list (down = smaller, up = bigger) or the slider ──
-  function changeZoom(next) {
-    const el = listEl.current
-    if (el) scrollRatio.current = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight)
-    setZoom((z) => clampZoom(typeof next === 'function' ? next(z) : next))
-  }
-
-  useEffect(() => {
-    const el = listEl.current
-    if (!el) return
-    const onWheel = (e) => {
-      if (!e.shiftKey) return
-      const d = e.deltaY || e.deltaX // Chrome turns Shift + wheel into a sideways scroll (deltaX)
-      if (!d) return
-      e.preventDefault()
-      changeZoom((z) => z * Math.exp(-d * 0.0015)) // ~14 % per mouse notch, smooth on a touchpad
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [])
-
-  useLayoutEffect(() => {
-    try {
-      localStorage.setItem('tad.classifyZoom', String(zoom))
-    } catch {}
-    const el = listEl.current
-    if (el && scrollRatio.current != null) {
-      el.scrollTop = scrollRatio.current * (el.scrollHeight - el.clientHeight)
-      scrollRatio.current = null
-    }
-  }, [zoom])
-
-  function stripDragOver(e) {
-    const el = strip.current
-    const r = el.getBoundingClientRect()
-    const edge = 60
-    if (e.clientX < r.left + edge) el.scrollLeft -= 12
-    else if (e.clientX > r.right - edge) el.scrollLeft += 12
-  }
-
-  // dragging several items shows a "N 個項目" badge instead of one card
-  function onDragStart(e) {
-    const id = e.target.closest?.('[data-id]')?.dataset.id
-    const n = id && selected.has(id) ? picked.length : 1
-    if (n > 1 && ghost.current) {
-      ghost.current.textContent = `${n} 個項目`
-      e.dataTransfer.setDragImage(ghost.current, 20, 20)
-    }
-  }
 
   // ── selection: click / Ctrl+click toggles, Shift+click selects a range (Ctrl+Shift adds it) ──
   function select(video, e = {}) {
@@ -435,115 +373,6 @@ export default function Classifier({ guard, onLogout }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [shown, dialog, menu])
-
-  // drag-select inside the bottom list (mouse only): press on empty space and drag a box. No key: replaces
-  // the selection · Shift: adds · Ctrl/⌘: toggles; a plain click on empty space clears it
-  const marquee = useRef(null)
-
-  function onPointerDown(e) {
-    if (e.pointerType !== 'mouse' || e.button !== 0) return
-    if (e.target.closest('a, button, input, select, textarea, label, [data-id]')) return
-    const c = listEl.current
-    const r = c.getBoundingClientRect()
-    if (e.clientX > r.left + c.clientWidth) return // the scroll bar
-    e.preventDefault()
-    document.activeElement?.blur?.()
-    marquee.current = {
-      x0: e.clientX - r.left + c.scrollLeft,
-      y0: e.clientY - r.top + c.scrollTop,
-      x: e.clientX,
-      y: e.clientY,
-      mode: e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'add' : 'replace',
-      base: selected,
-      active: false,
-      hitKey: null,
-    }
-  }
-
-  useEffect(() => {
-    let raf = 0
-    function update() {
-      const m = marquee.current
-      const c = listEl.current
-      if (!m || !c) return
-      const cr = c.getBoundingClientRect()
-      const px = m.x - cr.left + c.scrollLeft
-      const py = m.y - cr.top + c.scrollTop
-      if (!m.active) {
-        if (Math.hypot(px - m.x0, py - m.y0) < 6) return
-        m.active = true
-        // item positions in list coordinates, read once (they don't move while the list scrolls)
-        m.rects = [...c.querySelectorAll('[data-select-root] [data-id]')].map((el) => {
-          const r = el.getBoundingClientRect()
-          return { id: el.dataset.id, l: r.left - cr.left + c.scrollLeft, t: r.top - cr.top + c.scrollTop, r: r.right - cr.left + c.scrollLeft, b: r.bottom - cr.top + c.scrollTop }
-        })
-        raf = requestAnimationFrame(tick)
-      }
-      const l = Math.min(m.x0, px)
-      const r = Math.max(m.x0, px)
-      const t = Math.min(m.y0, py)
-      const b = Math.max(m.y0, py)
-      const box = boxEl.current
-      if (box) {
-        // drawn in viewport coordinates, clipped to the list
-        const top = Math.max(t - c.scrollTop + cr.top, cr.top)
-        const bottom = Math.min(b - c.scrollTop + cr.top, cr.bottom)
-        Object.assign(box.style, {
-          display: 'block',
-          left: `${l - c.scrollLeft + cr.left}px`,
-          top: `${top}px`,
-          width: `${r - l}px`,
-          height: `${Math.max(0, bottom - top)}px`,
-        })
-      }
-      const hits = m.rects.filter((x) => x.l < r && x.r > l && x.t < b && x.b > t).map((x) => x.id)
-      const key = hits.join()
-      if (key === m.hitKey) return
-      m.hitKey = key
-      const next = m.mode === 'replace' ? new Set() : new Set(m.base)
-      for (const id of hits) {
-        if (m.mode === 'toggle' && m.base.has(id)) next.delete(id)
-        else next.add(id)
-      }
-      setSelected(next)
-      if (hits.length) anchor.current = hits[0]
-    }
-    function tick() {
-      const m = marquee.current
-      const c = listEl.current
-      if (!m || !c) return
-      const cr = c.getBoundingClientRect()
-      const edge = 50
-      const dy = m.y < cr.top + edge ? -(cr.top + edge - m.y) / 3 : m.y > cr.bottom - edge ? (m.y - cr.bottom + edge) / 3 : 0
-      if (dy) c.scrollTop += dy
-      update()
-      raf = requestAnimationFrame(tick)
-    }
-    function onMove(e) {
-      const m = marquee.current
-      if (!m) return
-      m.x = e.clientX
-      m.y = e.clientY
-      update()
-    }
-    function onUp() {
-      const m = marquee.current
-      if (!m) return
-      marquee.current = null
-      cancelAnimationFrame(raf)
-      if (boxEl.current) boxEl.current.style.display = 'none'
-      if (!m.active && m.mode === 'replace') setSelected((prev) => (prev.size ? new Set() : prev))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-    return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-    }
-  }, [])
 
   function itemMenu(x, y, video) {
     const ids = selected.has(video.id) ? pickedIds : [video.id]
@@ -604,9 +433,9 @@ export default function Classifier({ guard, onLogout }) {
             <AppMenu onLogout={onLogout} />
           </div>
         </div>
-        <div ref={strip} onDragOver={stripDragOver} className="flex min-h-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden px-3 py-2">
+        <div ref={strip} className="flex min-h-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden px-3 py-2">
           <div
-            {...dropProps('+')}
+            data-new-series
             onClick={() => newSeries(pickedIds)}
             title={picked.length ? `用已選的 ${picked.length} 個建立新系列` : '把項目拖到這裡建立新系列'}
             style={{ width: Math.min(album, 140) + 16 }}
@@ -630,7 +459,6 @@ export default function Classifier({ guard, onLogout }) {
               size={album}
               over={over === s.name}
               picked={picked.length}
-              {...dropProps(s.name)}
               onClick={() => (picked.length ? addTo(s.name, pickedIds) : openSeries(s.name))}
               onMenu={(x, y) => seriesMenu(x, y, s.name)}
               onRename={() => renameSeries(s.name)}
@@ -694,20 +522,36 @@ export default function Classifier({ guard, onLogout }) {
               只顯示「{actor}」的項目
             </label>
           )}
-          <label className="flex items-center gap-1.5 text-sm text-neutral-400" title="卡片大小（也可以在清單上 Shift + 滾輪縮放）">
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
-              <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="currentColor" />
-            </svg>
+          <label className="flex items-center gap-1.5 text-sm text-neutral-400" title="畫布縮放（也可以在畫布上 Shift + 滾輪）">
+            <span aria-hidden>🔍</span>
             <input
               type="range"
-              min={ZOOM_MIN}
-              max={ZOOM_MAX}
-              value={zoom}
-              onChange={(e) => changeZoom(Number(e.target.value))}
-              aria-label="卡片大小"
+              min={Math.log(CANVAS_ZOOM_MIN)}
+              max={Math.log(CANVAS_ZOOM_MAX)}
+              step={0.01}
+              value={Math.log(canvasZoom)}
+              onChange={(e) => canvas.current?.zoomTo(Math.exp(Number(e.target.value)))}
+              aria-label="畫布縮放"
               className="w-24 accent-accent"
             />
+            <button onClick={() => canvas.current?.zoomTo(1)} className="w-11 text-left tabular-nums hover:text-white" title="回到 100%">
+              {Math.round(canvasZoom * 100)}%
+            </button>
           </label>
+          <div className="flex items-center overflow-hidden rounded-lg ring-1 ring-white/10">
+            <select
+              value={order}
+              onChange={(e) => setParam('order', e.target.value === 'title' ? 'title' : '')}
+              aria-label="排列順序"
+              className="bg-neutral-800 px-2 py-1 text-sm outline-none"
+            >
+              <option value="added">最新加入</option>
+              <option value="title">依標題</option>
+            </select>
+            <button onClick={() => canvas.current?.arrange()} className="bg-neutral-700 px-3 py-1 text-sm hover:bg-neutral-600" title="依順序重新排列所有項目">
+              排列
+            </button>
+          </div>
           {processing > 0 && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300">產生資訊/截圖中：{processing}</span>}
           <div className="ml-auto flex items-center gap-2 text-sm">
             {picked.length > 0 ? (
@@ -718,43 +562,35 @@ export default function Classifier({ guard, onLogout }) {
                 </button>
               </>
             ) : (
-              <span className="hidden text-xs text-neutral-500 md:inline">點選 · Shift / Ctrl + 點選 · 空白處拖曳框選 · Ctrl + A 全選 · Shift + 滾輪縮放</span>
+              <span className="hidden text-xs text-neutral-500 md:inline">拖曳移動或拖到系列 · 空白處拖曳框選 · Shift + 滾輪縮放 · 滾輪 / 空白鍵 + 拖曳移動畫布 · 雙擊開啟</span>
             )}
           </div>
         </div>
-        <div ref={listEl} onPointerDown={onPointerDown} onDragStart={onDragStart} className="min-h-0 flex-1 select-none overflow-y-auto px-4 py-4">
+        <div className="min-h-0 flex-1">
           {loading ? (
-            <p className="text-neutral-400">載入中…</p>
+            <p className="p-4 text-neutral-400">載入中…</p>
           ) : shown.length === 0 ? (
             <p className="py-16 text-center text-neutral-500">
               {videos.some((v) => !v.series) ? '沒有符合的項目' : '所有項目都已經加入系列了'}
             </p>
           ) : (
-            <div
-              data-select-root
-              className="grid"
-              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: zoom < COMPACT_BELOW ? 8 : 16 }}
-            >
-              {shown.map((v) => (
-                <div key={v.id} onDoubleClick={() => navigate(`/v/${v.id}`, { state: { backPath } })}>
-                  <VideoCard
-                    compact={zoom < COMPACT_BELOW}
-                    video={v}
-                    onMenu={itemMenu}
-                    selecting
-                    selected={selected.has(v.id)}
-                    onSelect={select}
-                    dragIds={selected.has(v.id) ? pickedIds : undefined}
-                  />
-                </div>
-              ))}
-            </div>
+            <ClassifierCanvas
+              ref={canvas}
+              items={shown}
+              layoutKey={layoutKey}
+              selected={selected}
+              setSelected={setSelected}
+              onSelect={select}
+              onOpen={(id) => navigate(`/v/${id}`, { state: { backPath } })}
+              onMenu={itemMenu}
+              onDragAt={dragAt}
+              onDropItems={dropItems}
+              onZoom={setCanvasZoom}
+            />
           )}
         </div>
       </section>
 
-      <div ref={boxEl} aria-hidden className="pointer-events-none fixed z-40 hidden rounded-sm border border-accent bg-accent/15" />
-      <div ref={ghost} aria-hidden className="fixed -left-[999px] top-0 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white" />
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {dialog && <PromptDialog {...dialog} onCancel={() => setDialog(null)} />}
       {toast && (

@@ -1,5 +1,18 @@
 # ChangeLog
 
+## [3.8.0] - 2026-11-26 - Classifier Canvas
+### Added
+- 分類器's 未分類 section is a canvas (`ClassifierCanvas.jsx`): each item shows its whole picture (object-contain, portrait videos stay recognisable) in justified rows, title under it, accent ring + ✓ when selected; the shape follows the loaded cover when it differs from the recorded size by > 8 % (rotated phone videos)
+- Drag items freely, or onto a series card / 「＋ 新系列」 (pointer events, `Classifier.jsx` `dragAt()` / `dropItems()`); drag on empty space = selection box; wheel pans, Shift + wheel / pinch zooms 10 %-400 % at the pointer (`tad.canvasZoom`), Space / middle button / touch drag pans; only items near the view are rendered; hover previews play on the canvas too (`useHoverPreview` / `PreviewVideo` exported from `VideoCard.jsx`)
+- Toolbar: zoom slider with percentage, order 最新加入 / 依標題 (`?order=title`) and 「排列」 button; the canvas is arranged on open and when the filters or order change, hand placement is kept until 排列
+### Removed
+- The classifier's card-size zoom (`tad.classifyZoom`, `VideoCard` `compact`) and the HTML5 drag & drop on series cards
+
+## [3.7.3] - 2026-11-26 - Portrait Preview Fix
+### Fixed
+- Hover preview clips failed (404) for every portrait video: `scale=-2:360:force_original_aspect_ratio=decrease` rounded the height to 359 and libx264 refuses odd sizes; now the short side is 360 and the other side even (portrait 720x1280 -> 360x640), and the pieces are spread over the picture's own length (a longer audio track gave a 3 s clip) (`media.make_preview()`)
+- A video whose clip can't be made is remembered by path + modified time, so hovering it again doesn't rerun ffmpeg; the failure is logged as a warning with ffmpeg's first error line (`server.py` `media_preview`)
+
 ## [3.7.2] - 2026-11-26 - Swipe Before Playing & Stream Fixes
 ### Added
 - Video page: before pressing ▶, swipe sideways on the cover (touch), the new ‹ › buttons or ←/→ switch to the previous / next video in the library's order and stay on its screenshots (`VideoPage.jsx` `swipeTo(dir, play=false)`, `swipeNav()`)

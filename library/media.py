@@ -422,7 +422,11 @@ def make_preview(video: str, duration: float) -> str:
     out = preview_path(video)
     tmp = out + '.part.mp4'
     threads = threads_args(share=2)
-    scale = f'scale=-2:{PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease,setsar=1,fps=24,format=yuv420p'
+    duration = _video_stream_duration(video) or duration   # audio longer than the picture: empty pieces
+    # short side PREVIEW_HEIGHT (portrait 720x1280 -> 360x640), the other side even: -2 keeps it divisible
+    # by 2 (force_original_aspect_ratio rounded portrait heights to 359 and libx264 refused every portrait video)
+    h = PREVIEW_HEIGHT
+    scale = f"scale='if(gte(iw,ih),-2,{h})':'if(gte(iw,ih),{h},-2)',setsar=1,fps=24,format=yuv420p"
     if duration <= PREVIEW_PARTS * PREVIEW_PART_SECONDS * 2:
         # short video: its first seconds
         inputs = ['-t', f'{min(duration or 6, PREVIEW_PARTS * PREVIEW_PART_SECONDS):.2f}', '-i', video]
@@ -444,10 +448,25 @@ def make_preview(video: str, duration: float) -> str:
             os.remove(tmp)
         except OSError:
             pass
-        err = result.stderr.decode('utf-8', 'replace').strip().splitlines()
-        raise RuntimeError(f"無法產生預覽片段：{err[-1] if err else result.returncode}")
+        err = [line for line in result.stderr.decode('utf-8', 'replace').splitlines() if line.strip()]
+        # the first line names the cause (e.g. "height not divisible by 2"); the last ones are generic
+        raise RuntimeError(f"無法產生預覽片段：{err[0].strip() if err else result.returncode}")
     os.replace(tmp, out)
     return out
+
+
+def _video_stream_duration(video: str) -> float:
+    """Length of the picture itself (the container's duration also counts a longer audio track); 0 if unknown."""
+    ffprobe = find_tool('ffprobe')
+    if not ffprobe:
+        return 0
+    try:
+        r = subprocess.run([ffprobe, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration',
+                            '-of', 'default=nw=1:nk=1', video],
+                           capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+        return float(r.stdout.strip().splitlines()[0])
+    except (ValueError, IndexError, OSError, subprocess.SubprocessError):
+        return 0
 
 
 # ─── photos ──────────────────────────────────────────────────────────────────
