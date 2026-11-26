@@ -58,6 +58,33 @@ def get_web_settings() -> dict:
     }
 
 
+DEFAULT_MAX_THREADS = 16
+
+
+def get_max_threads() -> int:
+    """MAX_THREADS: the most CPU threads the heavy work may use (ffmpeg, OpenCV, numpy, worker pools);
+    default 16, never more than the PC's cores (Windows app Configuration > Performance, v3.6.3)."""
+    try:
+        value = int(os.getenv('MAX_THREADS', DEFAULT_MAX_THREADS))
+    except ValueError:
+        value = DEFAULT_MAX_THREADS
+    return max(1, min(value, os.cpu_count() or value))
+
+
+def apply_thread_limit(limit: int = None) -> int:
+    """Apply MAX_THREADS to OpenCV (at once) and numpy's math libraries (they read it when first loaded,
+    so call this before numpy / cv2 are imported: main.py does)."""
+    limit = limit or get_max_threads()
+    for name in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_MAX_THREADS'):
+        os.environ[name] = str(limit)
+    try:
+        import cv2
+        cv2.setNumThreads(limit)
+    except Exception:
+        pass
+    return limit
+
+
 def get_ai_settings() -> dict:
     """AI 辨識 (web library): the Ollama server and vision model used to describe / compare outfits.
     An empty model means the first installed model that can see pictures (library/recognize.py)."""

@@ -89,6 +89,7 @@ class LibraryServer:
         self.recognizer = Recognizer(self.library)      # AI 辨識 queue (library/recognize.py)
         self.people = People(self.library)              # 人物資料庫, auto 主演 tags (library/people.py)
         self.library.on_change = self.people.wake
+        self.recognizer.people = self.people            # AI 辨識 reuses the database's 主演 faces
         # download a deleted file again through the running bot: returns an error text or None
         self.on_redownload = on_redownload
         self.sessions = Sessions(secret, password_hash)
@@ -653,7 +654,9 @@ class LibraryServer:
             from concurrent.futures import ThreadPoolExecutor
             self._loop = asyncio.new_event_loop()
             # named, so the Windows app's Diagnostics tab tells this pool from the bot's (both were "asyncio_N")
-            self._loop.set_default_executor(ThreadPoolExecutor(thread_name_prefix='web-library-worker'))
+            # at most MAX_THREADS of them (at least 2, so one slow request doesn't hold up the others)
+            self._loop.set_default_executor(ThreadPoolExecutor(max_workers=max(2, media.thread_limit()),
+                                                               thread_name_prefix='web-library-worker'))
             asyncio.set_event_loop(self._loop)
             try:
                 self._loop.run_until_complete(self.start())

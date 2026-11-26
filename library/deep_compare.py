@@ -53,8 +53,10 @@ def _run(cmd: List[str], timeout: float) -> bytes:
 
 def _curves(path: str, seconds: float) -> Tuple[np.ndarray, np.ndarray]:
     """Brightness of the picture's middle and the change from the previous frame, RATE per second."""
-    out = _run([_ffmpeg(), '-v', 'error', '-t', f'{seconds:.2f}', '-i', path, '-an', '-sn',
-                '-vf', f'fps={RATE},scale={_CURVE_W}:{_CURVE_H},format=gray', '-f', 'rawvideo', '-'], timeout=300)
+    threads = media.threads_args()
+    out = _run([_ffmpeg(), '-v', 'error', *threads, '-t', f'{seconds:.2f}', '-i', path, '-an', '-sn',
+                '-vf', f'fps={RATE},scale={_CURVE_W}:{_CURVE_H},format=gray', *threads, '-f', 'rawvideo', '-'],
+               timeout=300)
     frames = np.frombuffer(out, np.uint8)
     frames = frames[:len(frames) // (_CURVE_W * _CURVE_H) * _CURVE_W * _CURVE_H]
     frames = frames.reshape(-1, _CURVE_H, _CURVE_W).astype(np.float32)[:, 3:-3, 5:-5]   # skip borders
@@ -91,8 +93,10 @@ def _best_shift(ca: tuple, cb: tuple, min_overlap: float) -> Tuple[float, float]
 
 def _frame(path: str, t: float) -> Optional[np.ndarray]:
     import cv2
-    out = _run([_ffmpeg(), '-v', 'error', '-ss', f'{max(0.0, t):.3f}', '-i', path, '-frames:v', '1', '-an', '-sn',
-                '-vf', f'scale={FRAME_W}:-2', '-f', 'image2pipe', '-vcodec', 'png', '-'], timeout=60)
+    threads = media.threads_args()
+    out = _run([_ffmpeg(), '-v', 'error', *threads, '-ss', f'{max(0.0, t):.3f}', '-i', path, '-frames:v', '1',
+                '-an', '-sn', '-vf', f'scale={FRAME_W}:-2', *threads, '-f', 'image2pipe', '-vcodec', 'png', '-'],
+               timeout=60)
     if not out:
         return None
     return cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR)

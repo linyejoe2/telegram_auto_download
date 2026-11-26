@@ -1,5 +1,12 @@
 # ChangeLog
 
+## [3.6.3] - 2026-11-25 - Thread Limit & New Sorts
+### Added
+- Windows app Configuration tab "Performance" > "Max CPU threads" (`MAX_THREADS`, default 16, at most the PC's cores): ffmpeg (screenshots, live transcode, face-recognition frames, deep compare, 載入影片 compression), OpenCV, numpy and the worker pools use at most that many threads (`config.get_max_threads()` / `apply_thread_limit()`, `media.thread_limit()` / `threads_args()`, `src/ui.py`, `main.py`)
+- Library page 排序 options 系列 (also the list view's 系列 header) and 隨機 (order fixed by `?seed=`, 🎲 picks a new one) (`Library.jsx`)
+### Changed
+- AI 辨識 takes the 主演 references from the people database (`People.request_sync()` / `named_refs()`) instead of re-analysing every tagged item on each job, and picks 系列 references per series (`library/recognize.py`, `library/people.py`)
+
 ## [3.6.2] - 2026-11-25 - Idle CPU Fixes
 ### Fixed
 - 人物 page list (`People.overview()`, `GET /library/api/people`) looped over every item and face reference once per person, so one request took seconds with many 未命名人物 (~5.8 s for 5,000 items / 2,300 people) and the page's 2.5 s polling could keep the web library's worker thread busy all the time (the likely cause of the 90 % CPU seen while idle); now built in one pass (~13 ms) with the database lock held only while copying (`library/people.py`)

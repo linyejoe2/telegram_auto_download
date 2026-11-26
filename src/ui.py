@@ -25,7 +25,7 @@ from config.config import validate_config, get_web_settings, get_ai_settings
 
 class TelegramBotGUI:
     def __init__(self):
-        self.version = "v3.6.2"
+        self.version = "v3.6.3"
         self.root = tk.Tk()
         self.root.title("Telegram Auto Download Bot " + self.version)
         self.root.geometry("800x680")
@@ -203,6 +203,17 @@ class TelegramBotGUI:
         self.chromium_check_button.pack(side=tk.RIGHT, padx=5)
         self.chromium_install_button = ttk.Button(chromium_frame, text="Install", command=self.install_chromium)
         self.chromium_install_button.pack(side=tk.RIGHT, padx=5)
+
+        # CPU threads the heavy work may use (config.get_max_threads / media.thread_limit)
+        perf_frame = ttk.LabelFrame(parent, text="Performance", padding="10")
+        perf_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(perf_frame, text="Max CPU threads:").pack(side=tk.LEFT)
+        self.max_threads_var = tk.StringVar(value=str(bot_config.get_max_threads()))
+        ttk.Spinbox(perf_frame, from_=1, to=os.cpu_count() or 64, textvariable=self.max_threads_var,
+                    width=5).pack(side=tk.LEFT, padx=5)
+        ttk.Button(perf_frame, text="Save", command=self.save_max_threads).pack(side=tk.LEFT, padx=5)
+        ttk.Label(perf_frame, foreground="gray",
+                  text=f"of {os.cpu_count()} · ffmpeg, OpenCV, face analysis, worker pools").pack(side=tk.LEFT, padx=5)
 
     # ---------------------- web video library ----------------------
     def setup_web_tab(self, parent):
@@ -882,6 +893,21 @@ class TelegramBotGUI:
 
         threading.Thread(target=work, daemon=True).start()
 
+    def save_max_threads(self):
+        """MAX_THREADS: ffmpeg and OpenCV use it from now on; numpy and the worker pools after a restart."""
+        value = self.max_threads_var.get().strip()
+        cores = os.cpu_count() or 64
+        if not value.isdigit() or not 1 <= int(value) <= cores:
+            messagebox.showerror("Error", f"Max CPU threads must be a whole number from 1 to {cores}")
+            return
+        set_key('.env', 'MAX_THREADS', value)
+        os.environ['MAX_THREADS'] = value
+        bot_config.apply_thread_limit(int(value))
+        logging.info(f"Max CPU threads set to {value}")
+        messagebox.showinfo("Success", f"Max CPU threads set to {value}.\n\n"
+                            "ffmpeg (screenshots, transcoding, compression) and OpenCV use it from now on; "
+                            "the worker pools and numpy after restarting the app.")
+
     def browse_downloads_path(self):
         """Browse for downloads directory"""
         directory = filedialog.askdirectory(
@@ -1020,7 +1046,8 @@ class TelegramBotGUI:
         from concurrent.futures import ThreadPoolExecutor
         loop = asyncio.new_event_loop()
         # named, so the Diagnostics tab tells this pool from the web library's (both were "asyncio_N")
-        loop.set_default_executor(ThreadPoolExecutor(thread_name_prefix='bot-worker'))
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=max(2, bot_config.get_max_threads()),
+                                                     thread_name_prefix='bot-worker'))
         self.bot_loop = loop
         try:
             asyncio.set_event_loop(loop)

@@ -64,6 +64,24 @@ def shots_dir(video: str) -> str:
     return os.path.join(folder, f".{name}.shots")
 
 
+def thread_limit(share: int = 1) -> int:
+    """CPU threads one ffmpeg / worker may use: MAX_THREADS (default 16, at most the cores, set in the
+    Windows app) split between `share` jobs that run at the same time. Read live, so a change applies
+    to the next ffmpeg started."""
+    try:
+        limit = int(os.environ.get('MAX_THREADS') or 16)
+    except ValueError:
+        limit = 16
+    limit = max(1, min(limit, os.cpu_count() or limit))
+    return max(1, limit // max(1, share))
+
+
+def threads_args(share: int = 1) -> List[str]:
+    """ffmpeg's -threads option for its share of MAX_THREADS (put it before -i for decoding and before
+    the output for encoding / filtering)."""
+    return ['-threads', str(thread_limit(share))]
+
+
 def find_tool(name: str) -> Optional[str]:
     """ffmpeg / ffprobe from FFMPEG_PATH's folder or PATH."""
     configured = os.environ.get('FFMPEG_PATH', '').strip().strip('"')
@@ -326,8 +344,8 @@ def stream_command(ffmpeg: str, path: str, start: float, key: str, encoder: str)
         codec = ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '23', *rate]
     return [ffmpeg, '-hide_banner', '-loglevel', 'error',
             *(['-hwaccel', 'cuda'] if encoder == 'nvenc' else []),
-            '-ss', f'{start:.3f}', '-i', path, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
-            '-vf', scale, *codec, '-g', '48', '-c:a', 'aac', '-b:a', f'{audio}k', '-ac', '2',
+            *threads_args(), '-ss', f'{start:.3f}', '-i', path, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
+            '-vf', scale, *codec, *threads_args(), '-g', '48', '-c:a', 'aac', '-b:a', f'{audio}k', '-ac', '2',
             '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1']
 
 
@@ -349,13 +367,14 @@ def make_screenshots(video: str, duration: float, count: int = SHOT_COUNT) -> Li
     _hide(folder)
 
     names = []
+    threads = threads_args(share=2)          # the library makes screenshots in 2 background workers
     for i in range(count):
         t = duration * (i + 1) / (count + 1) if duration > 0 else 0
         name = f"{i + 1:02d}.jpg"
         out = os.path.join(folder, name)
         subprocess.run(
-            [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-ss', f'{t:.2f}', '-i', video,
-             '-frames:v', '1', '-vf', f'scale={SHOT_WIDTH}:-2', '-q:v', '4', out],
+            [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', *threads, '-ss', f'{t:.2f}', '-i', video,
+             '-frames:v', '1', '-vf', f'scale={SHOT_WIDTH}:-2', '-q:v', '4', *threads, out],
             capture_output=True, timeout=120, creationflags=_NO_WINDOW,
         )
         if os.path.exists(out) and os.path.getsize(out) > 0:

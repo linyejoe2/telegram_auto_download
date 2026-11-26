@@ -62,6 +62,8 @@ class People:
         self.scan_all = False
         self.next_num = 1
         self._matrix = None
+        self.synced = False                     # the 主演 references were built at least once
+        self._want = self._done = 0             # sync requests (AI 辨識 jobs) / the newest one served
 
     # ── storage ──
 
@@ -188,6 +190,9 @@ class People:
             self._load()
         snap = self._snapshot()
         if not snap:
+            with self._lock:
+                self.synced = True
+                self._done = self._want
             return
         self._sync(snap)
         while not self._stop:
@@ -200,6 +205,8 @@ class People:
             for i, e in enumerate(todo):
                 if self._stop or not (e['added'] >= self.since or self.scan_all):
                     break
+                if self._want > self._done:        # an AI 辨識 job waits for fresh references
+                    self._sync(self._snapshot())
                 self.status.update(phase='scan', done=i, total=total)
                 self._recognize(e)
                 with self._lock:
@@ -278,6 +285,7 @@ class People:
     # ── 主演 tags -> named people ──
 
     def _sync(self, snap: List[dict]):
+        ticket = self._want                      # requests made before this point are served by this sync
         group_of = {e['uid']: e['group'] for e in snap}
         present = set(group_of)
         with self._lock:
@@ -324,6 +332,25 @@ class People:
                 if pid not in have and not (p['name'] and p['name'].lower() in names):
                     del self.people[pid]
                     self._changed()
+            self.synced = True
+            self._done = max(self._done, ticket)
+
+    def request_sync(self) -> int:
+        """Ask for the 主演 references to catch up with the current tags; returns a ticket for is_synced()."""
+        with self._lock:
+            self._want += 1
+            ticket = self._want
+        self.wake()
+        return ticket
+
+    def is_synced(self, ticket: int) -> bool:
+        return self._done >= ticket
+
+    def named_refs(self) -> List[tuple]:
+        """(name, item uid, person index, vector) of every face of a named person (AI 辨識 reuses them)."""
+        with self._lock:
+            return [(self.people[r['pid']]['name'], r['uid'], r['pi'], r['feat']) for r in self.refs
+                    if r['pid'] in self.people and self.people[r['pid']]['name']]
 
     def _derive(self, e: dict, data: Optional[dict], group_of: Dict[str, str]):
         """The tag references of one item: which of its faces is which of its 主演."""

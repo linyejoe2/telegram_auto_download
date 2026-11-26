@@ -192,13 +192,16 @@ def _video_frames(path: str, duration: float) -> List[tuple]:
     times = [duration * (0.05 + 0.9 * (i + 0.5) / FRAMES) for i in range(FRAMES)] if duration > 0 else [0.0]
     scale = (f"scale=w='if(gte(iw,ih),min({FRAME_MAX},iw),-2)':h='if(gte(iw,ih),-2,min({FRAME_MAX},ih))'")
 
+    parallel = min(4, media.thread_limit())       # 4 frames at a time, sharing MAX_THREADS
+    threads = media.threads_args(share=parallel)
+
     def grab(t):
-        r = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-ss', f'{t:.2f}', '-i', path,
-                            '-frames:v', '1', '-vf', scale, '-c:v', 'bmp', '-f', 'image2pipe', '-'],
+        r = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', *threads, '-ss', f'{t:.2f}', '-i', path,
+                            '-frames:v', '1', '-vf', scale, *threads, '-c:v', 'bmp', '-f', 'image2pipe', '-'],
                            capture_output=True, timeout=120, creationflags=_NO_WINDOW)
         return t, _decode(r.stdout)
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
         return [(t, img) for t, img in pool.map(grab, times) if img is not None]
 
 
@@ -535,6 +538,7 @@ class Recognizer:
         self._thread: Optional[threading.Thread] = None
         self._face: Optional[FaceModel] = None
         self._cancel = set()
+        self.people = None          # library/people.People (set by LibraryServer): its 主演 references are reused
 
     # ── storage ──
 
@@ -741,7 +745,7 @@ class Recognizer:
                 if not e:
                     continue
                 meta = e['meta']
-                out.append({'id': vid, 'path': e['path'], 'rel': e['rel'], 'kind': e['kind'],
+                out.append({'id': vid, 'uid': meta.get('uid'), 'path': e['path'], 'rel': e['rel'], 'kind': e['kind'],
                             'actors': list(meta.get('actors') or []), 'series': meta.get('series') or '',
                             'group': meta.get('group') or '', 'ready': bool(meta.get('info')),
                             'duration': (meta.get('info') or {}).get('duration') or 0,
@@ -790,7 +794,11 @@ class Recognizer:
 
     def _actor_refs(self, job: dict, done: Dict[str, dict]):
         """Faces of every item tagged with 主演: {actor lower: {'name', 'feats', 'items', 'groups'}} and,
-        per item, which person is which of its actors ({id: {person index: actor}})."""
+        per item, which person is which of its actors ({id: {person index: actor}}), plus the analyses
+        ({id: analysis}) it had to make. Taken from the people database when there is one (v3.6.3);
+        only without it (tests, a library without the server) is every tagged item analysed here."""
+        if self.people is not None:
+            return self._refs_from_people(job)
         tagged = [it for it in self._items() if it['actors']]
         analysed = []
         for i, item in enumerate(tagged):
@@ -829,7 +837,32 @@ class Recognizer:
             own[item['id']] = assigned
             for pi, actor in assigned.items():
                 add(actor, item, data['feats'][pi])
-        return refs, own, analysed
+        return refs, own, {item['id']: data for item, data in analysed}
+
+    def _refs_from_people(self, job: dict):
+        """The 主演 references the people database (library/people.py) already keeps: no item is analysed
+        again. Waits while the database is still being built for the first time."""
+        people = self.people
+        ticket = people.request_sync()           # include tags edited just before the job
+        while not people.is_synced(ticket):
+            s = people.status
+            if s.get('error'):
+                raise RuntimeError(f"人物資料庫錯誤：{s['error']}")
+            phase = '等待人物資料庫建立完成' if not people.synced else '更新人物資料庫'
+            self._step(job, phase, s.get('done') or 0, s.get('total') or 0 if s.get('phase') == 'sync' else 0)
+            time.sleep(0.5)
+        by_uid = {it['uid']: it for it in self._items() if it.get('uid')}
+        refs, own = {}, {}
+        for name, uid, pi, feat in people.named_refs():
+            item = by_uid.get(uid)
+            if not item:
+                continue
+            r = refs.setdefault(name.lower(), {'name': name, 'feats': [], 'items': [], 'groups': []})
+            r['feats'].append(feat)
+            r['items'].append(item['id'])
+            r['groups'].append(item['group'])
+            own.setdefault(item['id'], {})[pi] = name
+        return refs, own, {}
 
     @staticmethod
     def _best(refs: dict, feat, item: dict, among=None) -> Optional[tuple]:
@@ -938,20 +971,23 @@ class Recognizer:
 
         # items of the same actor that already have a 系列: the reference for existing series names
         targets = set(job['ids'])
+        library_items = [it for it in self._items() if it['series'] and it['actors']]
         for p in people.values():
             p['refs'] = []
             if not p['actor']:
                 continue
-            per_series = {}
-            for item, data in analysed:
-                if item['id'] in targets or not item['series']:
+            low, per_series = p['actor'].lower(), {}
+            for item in library_items:
+                if item['id'] in targets or not item['series'] or len(per_series.get(item['series'], [])) >= SERIES_REFS:
                     continue
-                person = next((pi for pi, a in own.get(item['id'], {}).items() if a.lower() == p['actor'].lower()), None)
+                person = next((pi for pi, a in own.get(item['id'], {}).items() if a.lower() == low), None)
                 if person is None:
                     continue
-                per_series.setdefault(item['series'], []).append((item, data, person))
-            for series, items in per_series.items():
-                p['refs'].extend(items[:SERIES_REFS])
+                data = analysed.get(item['id']) or self._analyze(item)[0]     # cached: quick
+                if data and person < len(data['persons']):
+                    per_series.setdefault(item['series'], []).append((item, data, person))
+            for items in per_series.values():
+                p['refs'].extend(items)
 
         # describe the outfit of every person in play
         everyone = [(p, m, False) for p in people.values() for m in p['members']] + \

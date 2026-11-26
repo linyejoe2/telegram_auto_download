@@ -17,7 +17,29 @@ const SORTS = {
     fn: (a, b) =>
       Math.min(b.width || 0, b.height || 0) - Math.min(a.width || 0, a.height || 0) || (b.bit_rate || 0) - (a.bit_rate || 0),
   },
+  // by 系列 name, items without one last; within a series by title
+  series: {
+    label: '系列',
+    fn: (a, b) =>
+      !a.series - !b.series || (a.series || '').localeCompare(b.series || '', 'zh-Hant') || a.title.localeCompare(b.title, 'zh-Hant'),
+  },
+  // random, but fixed by the seed in the URL (?seed=): a reload / the background refresh keeps the order and
+  // the scroll position, new items land in random places; 🎲 picks a new seed. Sorted in `shown`.
+  random: { label: '隨機', fn: null },
 }
+
+// FNV-1a of seed + id: each item's place in the random order
+function randomKey(seed, id) {
+  let h = 2166136261
+  const s = `${seed}:${id}`
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+const newSeed = () => Math.random().toString(36).slice(2, 8)
 
 function readView() {
   try {
@@ -75,7 +97,8 @@ export default function Library({ guard, onLogout }) {
   const actor = params.get('actor') || ''
   const series = params.get('series') || ''
   const folder = params.get('folder') || ''
-  const sort = params.get('sort') || 'added'
+  const sort = SORTS[params.get('sort')] ? params.get('sort') : 'added'
+  const seed = params.get('seed') || '' // 隨機: fixes the order
   const kind = KINDS[params.get('kind')] ? params.get('kind') : storedKind() // 影片 / 圖片 / 全部
   const apiKind = kind === 'all' ? '' : kind
   const K = KINDS[kind]
@@ -86,6 +109,23 @@ export default function Library({ guard, onLogout }) {
     else next.delete(key)
     setParams(next, { replace: true })
   }
+
+  // 隨機 needs a seed in the URL (a new one each time it is picked or 🎲 is pressed); other sorts drop it
+  function setSort(value, reshuffle = false) {
+    const next = new URLSearchParams(params)
+    if (value === 'added') next.delete('sort')
+    else next.set('sort', value)
+    if (value === 'random') {
+      if (reshuffle || !next.get('seed')) next.set('seed', newSeed())
+    } else next.delete('seed')
+    setParams(next, { replace: true })
+    if (reshuffle) window.scrollTo(0, 0)
+  }
+
+  // a link / bookmark with ?sort=random but no seed gets one
+  useEffect(() => {
+    if (sort === 'random' && !seed) setSort('random')
+  }, [sort, seed])
 
   // link: optional { label, to } shown as a button in the toast
   function notify(text, error = false, link = null) {
@@ -404,8 +444,13 @@ export default function Library({ guard, onLogout }) {
       else if (!best[v.group] || qualityKey(v) > qualityKey(best[v.group])) best[v.group] = v
     }
     for (const v of Object.values(best)) items.push({ ...v, versions: groupSize[v.group] })
+    if (sort === 'random') {
+      // the group id for a version, so switching the shown version doesn't move the video
+      const key = new Map(items.map((v) => [v.id, randomKey(seed, v.group || v.id)]))
+      return items.sort((a, b) => key.get(a.id) - key.get(b.id))
+    }
     return items.sort(SORTS[sort]?.fn || SORTS.added.fn)
-  }, [videos, q, actor, series, folder, sort])
+  }, [videos, q, actor, series, folder, sort, seed])
 
   // Scroll position per view (folder / filters / sort = the query string), kept for this tab: coming back
   // from a video or reloading puts the list where it was. Restored once, after the list has rendered;
@@ -690,11 +735,21 @@ export default function Library({ guard, onLogout }) {
                 <option key={s.name} value={s.name}>{`${s.name} (${s.count})`}</option>
               ))}
             </Select>
-            <Select label="排序" value={sort} onChange={(v) => setParam('sort', v === 'added' ? '' : v)}>
+            <Select label="排序" value={sort} onChange={(v) => setSort(v)}>
               {Object.entries(SORTS).map(([k, s]) => (
                 <option key={k} value={k}>{s.label}</option>
               ))}
             </Select>
+            {sort === 'random' && (
+              <button
+                onClick={() => setSort('random', true)}
+                className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm hover:bg-neutral-700"
+                title="重新隨機排列"
+                aria-label="重新隨機排列"
+              >
+                🎲
+              </button>
+            )}
             {filtered && (
               <button onClick={() => setParams(kind === storedKind() ? {} : { kind }, { replace: true })} className="text-sm text-neutral-400 hover:text-white">
                 清除篩選
@@ -721,9 +776,15 @@ export default function Library({ guard, onLogout }) {
               <span />
               <span>標題 / 檔案</span>
               <span>主演</span>
-              <span>系列</span>
               <button
-                onClick={() => setParam('sort', sort === 'quality' ? '' : 'quality')}
+                onClick={() => setSort(sort === 'series' ? 'added' : 'series')}
+                className={`text-left hover:text-white ${sort === 'series' ? 'text-white' : ''}`}
+                title="依系列排序"
+              >
+                系列{sort === 'series' ? ' ↓' : ''}
+              </button>
+              <button
+                onClick={() => setSort(sort === 'quality' ? 'added' : 'quality')}
                 className={`text-left hover:text-white ${sort === 'quality' ? 'text-white' : ''}`}
                 title="依畫質排序（解析度，再比 bit rate）"
               >

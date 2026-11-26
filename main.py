@@ -10,6 +10,12 @@ import sys
 import os
 import argparse
 import io
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# MAX_THREADS (default 16) must be in place before numpy / OpenCV load: their thread pools read it once
+from config.config import apply_thread_limit
+apply_thread_limit()
+
 import cv2
 
 def fix_stdin_stdout():

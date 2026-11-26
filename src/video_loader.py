@@ -75,13 +75,16 @@ def compress_video(src: str, duration: float, progress: Callable[[float], None])
 
     dst = compressed_path(src)
     tmp = dst + '.part'            # unfinished
+    from config.config import get_max_threads
+    threads = str(get_max_threads())   # MAX_THREADS (Windows app Configuration > Performance)
     cmd = [
         ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1',
-        '-i', src, '-map', '0:v:0', '-map', '0:a:0?',
+        '-threads', threads, '-i', src, '-map', '0:v:0', '-map', '0:a:0?',
         '-vf', f"scale=-2:'min({TARGET_HEIGHT},ih)'",
         '-c:v', 'libx265', '-preset', 'fast', '-b:v', f'{TARGET_BITRATE_KBPS}k',
         '-maxrate', f'{int(TARGET_BITRATE_KBPS * 1.2)}k', '-bufsize', f'{TARGET_BITRATE_KBPS * 2}k',
-        '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1', '-x265-params', 'log-level=error',
+        '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1', '-x265-params', f'pools={threads}:log-level=error',
+        '-threads', threads,
         '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-f', 'mp4', tmp,
     ]
     logger.info(f"壓縮影片: {src}")

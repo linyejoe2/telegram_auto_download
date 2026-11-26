@@ -83,7 +83,8 @@ class Library:
         self._base_path = base_path
         self.entries: Dict[str, dict] = {}      # id -> {'path', 'rel', 'kind', 'meta', 'meta_mtime', 'error'}
         self._lock = threading.RLock()
-        self._pool = ThreadPoolExecutor(max_workers=BACKGROUND_WORKERS, thread_name_prefix='library')
+        self._pool = ThreadPoolExecutor(max_workers=min(BACKGROUND_WORKERS, media.thread_limit()),
+                                        thread_name_prefix='library')
         self._pending = set()                    # ids with a background job queued / running
         self.last_scan = 0.0
         self.deferred = 0                        # videos skipped by the last scan because they're still changing
