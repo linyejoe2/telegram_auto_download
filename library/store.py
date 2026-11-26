@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from . import media, similarity
 
@@ -290,6 +290,17 @@ class Library:
             'error': entry.get('error'),
             'group': meta.get('group') or '',
         }
+
+    def preview_source(self, vid: str) -> Optional[Tuple[str, float]]:
+        """(path, duration) of a video whose info is ready (hover preview clip), else None."""
+        with self._lock:
+            entry = self.entries.get(vid)
+            if not entry or entry['kind'] != 'video' or entry['meta'].get('error'):
+                return None
+            duration = (entry['meta'].get('info') or {}).get('duration') or 0
+            if not duration or vid in self._pending:   # screenshots being made clear the shots folder
+                return None
+            return entry['path'], float(duration)
 
     def detail(self, vid: str) -> Optional[dict]:
         with self._lock:

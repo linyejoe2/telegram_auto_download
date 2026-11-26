@@ -7,6 +7,7 @@ Everything lives under PREFIX (/library); "/" answers an empty page.
   /library/media/<id>/file    original file with HTTP range support (direct play)    — login required
   /library/media/<id>/stream  live H.264 transcode via ffmpeg, ?t=<start s>&q=<level> — login required
   /library/media/<id>/shots/  auto screenshots                                       — login required
+  /library/media/<id>/preview.mp4  hover preview clip, made on first request          — login required
   /library/media/<id>/ai/     face / body crops made by AI 辨識                       — login required
   /library/...                the React frontend (library/static, built by `npm run build` in frontend/)
 
@@ -19,6 +20,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import threading
 from typing import Callable, Optional
@@ -39,6 +41,8 @@ PREFIX = '/library'          # the whole web app (frontend, API, media) lives un
 RESCAN_SECONDS = 5 * 60
 _SHOT_RE = re.compile(r'^\d{2}\.jpg$')
 _NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+STREAMS_PER_VIEWER = 2      # live transcodes one browser may have open (older ones are stopped)
+STREAMS_TOTAL = 4           # live transcodes at once on this PC
 
 
 def static_dir() -> str:
@@ -88,6 +92,9 @@ class LibraryServer:
         self.library.on_grouped = on_grouped
         self.recognizer = Recognizer(self.library)      # AI 辨識 queue (library/recognize.py)
         self.people = People(self.library)              # 人物資料庫, auto 主演 tags (library/people.py)
+        self._streams = []                               # live transcodes: {proc, viewer, stopped?}
+        self._preview_locks = {}                         # video id -> asyncio.Lock while its preview clip is made
+        self._preview_slots = asyncio.Semaphore(2)       # preview clips made at the same time
         self.library.on_change = self.people.wake
         self.recognizer.people = self.people            # AI 辨識 reuses the database's 主演 faces
         # download a deleted file again through the running bot: returns an error text or None
@@ -148,6 +155,7 @@ class LibraryServer:
         r.add_post(PREFIX + '/api/history/redownload', self.redownload)
         r.add_get(PREFIX + '/media/{id}/file', self.media_file)
         r.add_get(PREFIX + '/media/{id}/stream', self.media_stream)
+        r.add_get(PREFIX + '/media/{id}/preview.mp4', self.media_preview)
         r.add_get(PREFIX + '/media/{id}/shots/{name}', self.media_shot)
         r.add_get(PREFIX + '/media/{id}/ai/{name}', self.media_ai)
         r.add_get('/', self.blank)
@@ -556,6 +564,46 @@ class LibraryServer:
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={'Cache-Control': 'private, no-cache'})
 
+    async def media_preview(self, request: web.Request):
+        """Hover preview: a small muted clip made on the first request and kept in the shots folder."""
+        vid = request.match_info['id']
+        source = self.library.preview_source(vid)
+        if not source:
+            raise web.HTTPNotFound()
+        path, duration = source
+        headers = {'Cache-Control': 'private, no-cache'}
+        ready = media.fresh_preview(path)
+        if not ready:
+            lock = self._preview_locks.setdefault(vid, asyncio.Lock())
+            async with lock:                  # the same video hovered twice: made once
+                ready = media.fresh_preview(path)
+                if not ready:
+                    async with self._preview_slots:   # at most 2 clips made at a time
+                        try:
+                            ready = await asyncio.get_running_loop().run_in_executor(None, media.make_preview, path, duration)
+                        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+                            logger.info(f"影片庫：{e}（{os.path.basename(path)}）")
+                            raise web.HTTPNotFound()
+            self._preview_locks.pop(vid, None)
+        return web.FileResponse(ready, headers=headers)
+
+    def _register_stream(self, request: web.Request, proc) -> dict:
+        """Keep track of live transcodes. A viewer's older streams beyond STREAMS_PER_VIEWER are stopped
+        (a player the browser didn't close keeps its connection, ffmpeg and a GPU encoder slot busy; six of
+        them use up the browser's connections and every other request hangs), and so are the oldest ones
+        beyond STREAMS_TOTAL."""
+        viewer = (request.remote, request.headers.get('User-Agent', ''))
+        entry = {'proc': proc, 'viewer': viewer}
+        self._streams.append(entry)
+        mine = [s for s in self._streams if s['viewer'] == viewer]
+        stale = mine[:-STREAMS_PER_VIEWER] + self._streams[:-STREAMS_TOTAL]
+        for s in stale:
+            if s['proc'].returncode is None:
+                logger.info('影片庫：結束舊的轉檔串流')
+                s['stopped'] = True
+                s['proc'].kill()              # its handler sees the end of the output and finishes
+        return entry
+
     async def media_stream(self, request: web.Request):
         """Fragmented MP4 (H.264 + AAC) from `t` seconds on; the player restarts it to seek."""
         path = self._video_path(request)
@@ -574,16 +622,17 @@ class LibraryServer:
                 *media.stream_command(ffmpeg, path, start, key, encoder),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, creationflags=_NO_WINDOW)
 
-        proc = await spawn(encoder)
-        chunk = await proc.stdout.read(256 * 1024)
-        if not chunk and encoder != 'cpu' and await proc.wait() != 0:
-            # GPU encoder unavailable right now (e.g. NVENC session limit): use the CPU for this stream
-            logger.warning('影片庫：GPU 轉檔失敗，改用 CPU')
-            proc = await spawn('cpu')
-            chunk = await proc.stdout.read(256 * 1024)
         response = web.StreamResponse(headers={'Content-Type': 'video/mp4', 'Cache-Control': 'no-store'})
-        await response.prepare(request)
-        try:
+        proc = await spawn(encoder)
+        entry = self._register_stream(request, proc)
+        try:                                  # whatever happens (viewer left early, error), ffmpeg is stopped
+            chunk = await proc.stdout.read(256 * 1024)
+            if not chunk and encoder != 'cpu' and not entry.get('stopped') and await proc.wait() != 0:
+                # GPU encoder unavailable right now (e.g. NVENC session limit): use the CPU for this stream
+                logger.warning('影片庫：GPU 轉檔失敗，改用 CPU')
+                proc = entry['proc'] = await spawn('cpu')
+                chunk = await proc.stdout.read(256 * 1024)
+            await response.prepare(request)
             while chunk:
                 await response.write(chunk)
                 chunk = await proc.stdout.read(256 * 1024)
@@ -592,7 +641,13 @@ class LibraryServer:
         finally:
             if proc.returncode is None:
                 proc.kill()
-                await proc.wait()
+            try:
+                # asyncio's wait() only returns once the output pipe is read to its end (it hung forever here)
+                await asyncio.wait_for(proc.communicate(), 10)
+            except (asyncio.TimeoutError, OSError, ValueError):
+                pass
+            if entry in self._streams:
+                self._streams.remove(entry)
         return response
 
     async def blank(self, request: web.Request):

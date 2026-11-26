@@ -386,6 +386,70 @@ def make_screenshots(video: str, duration: float, count: int = SHOT_COUNT) -> Li
     return names
 
 
+# ─── hover preview clip ──────────────────────────────────────────────────────
+
+PREVIEW_NAME = 'preview.mp4'        # in the shots folder (removed / regenerated with the screenshots)
+PREVIEW_PARTS = 6                   # short pieces from across the video
+PREVIEW_PART_SECONDS = 1.5
+PREVIEW_HEIGHT = 360
+
+
+def preview_path(video: str) -> str:
+    return os.path.join(shots_dir(video), PREVIEW_NAME)
+
+
+def fresh_preview(video: str) -> Optional[str]:
+    """The cached preview clip when it is newer than the video file, else None."""
+    out = preview_path(video)
+    try:
+        if os.path.getsize(out) > 0 and os.path.getmtime(out) >= os.path.getmtime(video):
+            return out
+    except OSError:
+        pass
+    return None
+
+
+def make_preview(video: str, duration: float) -> str:
+    """A small muted clip for the hover preview: PREVIEW_PARTS pieces of PREVIEW_PART_SECONDS from across
+    the video (the whole start of a short one), 360p H.264. Each piece is read with a fast seek, so a long
+    video costs no more than a short one. Returns the path; raises RuntimeError."""
+    ffmpeg = find_tool('ffmpeg')
+    if not ffmpeg:
+        raise RuntimeError('找不到 ffmpeg（請安裝並加入 PATH，或設定 FFMPEG_PATH）')
+    folder = shots_dir(video)
+    os.makedirs(folder, exist_ok=True)
+    _hide(folder)
+    out = preview_path(video)
+    tmp = out + '.part.mp4'
+    threads = threads_args(share=2)
+    scale = f'scale=-2:{PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease,setsar=1,fps=24,format=yuv420p'
+    if duration <= PREVIEW_PARTS * PREVIEW_PART_SECONDS * 2:
+        # short video: its first seconds
+        inputs = ['-t', f'{min(duration or 6, PREVIEW_PARTS * PREVIEW_PART_SECONDS):.2f}', '-i', video]
+        graph = f'[0:v]{scale}[v]'
+    else:
+        inputs, parts = [], []
+        for i in range(PREVIEW_PARTS):
+            t = duration * (i + 0.5) / PREVIEW_PARTS
+            inputs += ['-ss', f'{t:.2f}', '-t', f'{PREVIEW_PART_SECONDS}', '-i', video]
+            parts.append(f'[{i}:v]{scale}[p{i}]')
+        graph = ';'.join(parts) + ';' + ''.join(f'[p{i}]' for i in range(PREVIEW_PARTS)) + f'concat=n={PREVIEW_PARTS}:v=1:a=0[v]'
+    result = subprocess.run(
+        [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', *threads, *inputs, '-filter_complex', graph, '-map', '[v]',
+         '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-movflags', '+faststart', *threads, tmp],
+        capture_output=True, timeout=180, creationflags=_NO_WINDOW,
+    )
+    if result.returncode != 0 or not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        err = result.stderr.decode('utf-8', 'replace').strip().splitlines()
+        raise RuntimeError(f"無法產生預覽片段：{err[-1] if err else result.returncode}")
+    os.replace(tmp, out)
+    return out
+
+
 # ─── photos ──────────────────────────────────────────────────────────────────
 
 def process_image(path: str) -> Tuple[dict, List[str]]:

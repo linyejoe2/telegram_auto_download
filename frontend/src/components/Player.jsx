@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fmtBitrate, fmtDuration, MEDIA } from '../api.js'
+import { fmtBitrate, fmtDuration, MEDIA, releaseVideo } from '../api.js'
 import { defaultQuality, fillScreen, kbpsText, ORIGINAL, RANK, setFillScreen } from '../settings.js'
 
 const HIDE_AFTER = 3000 // ms without touching / moving before the controls hide while playing
@@ -210,6 +210,13 @@ export default function Player({ video, startAt = 0, onTime, container, nav = {}
   useEffect(() => {
     if (ref.current) ref.current.volume = volume
   }, [volume, src])
+
+  // the <video> is keyed by src: a seek / quality change / another video drops it. Stop its download
+  // first, or the old stream keeps a connection and an ffmpeg busy (switching a few videos hung the page)
+  useEffect(() => {
+    const el = ref.current
+    return () => releaseVideo(el)
+  }, [src])
 
   // ── swipe to the previous / next video (touch) ──
 

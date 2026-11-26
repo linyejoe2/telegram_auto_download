@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, DRAG_TYPE, getDragItems, KINDS, qualityKey } from '../api.js'
 import VideoCard from '../components/VideoCard.jsx'
@@ -10,6 +10,35 @@ import { ContextMenu, PromptDialog } from '../components/Dialogs.jsx'
 // three quarters: items without a 系列 (they leave the list once they get one).
 
 const byAdded = (a, b) => (b.added || 0) - (a.added || 0)
+
+// card width of the 未分類 list (Shift + wheel / the slider), remembered per browser
+const ZOOM_MIN = 90
+const ZOOM_MAX = 360
+const ZOOM_DEFAULT = 240
+const COMPACT_BELOW = 170 // smaller cards show only the title
+const clampZoom = (n) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(n)))
+
+// share of the page the series get (the divider), remembered per browser
+const SPLIT_DEFAULT = 0.25
+const SPLIT_MIN = 0.15
+const SPLIT_MAX = 0.8
+const clampSplit = (n) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, n))
+
+function readSplit() {
+  try {
+    return clampSplit(Number(localStorage.getItem('tad.classifySplit')) || SPLIT_DEFAULT)
+  } catch {
+    return SPLIT_DEFAULT
+  }
+}
+
+function readZoom() {
+  try {
+    return clampZoom(Number(localStorage.getItem('tad.classifyZoom')) || ZOOM_DEFAULT)
+  } catch {
+    return ZOOM_DEFAULT
+  }
+}
 
 // versions of the same video show once (the best quality one), like the library page
 function collapse(list, all) {
@@ -25,8 +54,12 @@ function collapse(list, all) {
   return out.sort(byAdded)
 }
 
-function SeriesCard({ name, items, over, picked, onDrop, onDragOver, onDragLeave, onClick, onMenu, onRename }) {
-  const covers = items.slice(0, 4)
+// size = the album's side in px, from the top section's height (drag the divider): bigger albums show
+// more covers (2×2, 3×3, 4×4) so the items of a series can be compared
+function SeriesCard({ name, items, size, over, picked, onDrop, onDragOver, onDragLeave, onClick, onMenu, onRename }) {
+  // as many columns as the size allows, but no empty rows: 6 items -> 3×3, not 4×4
+  const cols = Math.min(size < 200 ? 2 : size < 360 ? 3 : 4, Math.max(2, Math.ceil(Math.sqrt(items.length))))
+  const covers = items.slice(0, cols * cols)
   return (
     <div
       data-series={name}
@@ -39,10 +72,12 @@ function SeriesCard({ name, items, over, picked, onDrop, onDragOver, onDragLeave
         onMenu(e.clientX, e.clientY)
       }}
       title={picked ? `點一下把已選的 ${picked} 個加入「${name}」` : `${name}（${items.length} 個）· 點一下在媒體庫查看 · 右鍵改名`}
-      className="group relative flex w-28 shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl p-1.5 hover:bg-white/5"
+      style={{ width: size + 16 }}
+      className="group relative flex shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl p-1.5 hover:bg-white/5"
     >
       <div
-        className={`grid h-24 w-24 grid-cols-2 grid-rows-2 gap-1 rounded-2xl bg-neutral-800/80 p-1.5 ring-1 transition ${
+        style={{ width: size, height: size, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${cols}, 1fr)`, gap: size < 200 ? 4 : 6, padding: size < 200 ? 6 : 8 }}
+        className={`grid rounded-2xl bg-neutral-800/80 ring-1 transition ${
           over ? 'scale-105 bg-accent/30 ring-2 ring-accent' : picked ? 'ring-accent/50' : 'ring-white/10'
         }`}
       >
@@ -51,11 +86,11 @@ function SeriesCard({ name, items, over, picked, onDrop, onDragOver, onDragLeave
             {v.cover && <img src={v.cover} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
           </div>
         ))}
-        {Array.from({ length: 4 - covers.length }, (_, i) => (
+        {Array.from({ length: cols * cols - covers.length }, (_, i) => (
           <div key={`e${i}`} className="rounded-md bg-neutral-700/40" />
         ))}
       </div>
-      <p className="line-clamp-2 w-full text-center text-xs leading-tight" title={name}>
+      <p className={`line-clamp-2 w-full text-center leading-tight ${size < 200 ? 'text-xs' : 'text-sm'}`} title={name}>
         {name}
       </p>
       <span className="absolute right-1 top-1 rounded-full bg-neutral-950/90 px-1.5 text-[11px] tabular-nums text-neutral-300 ring-1 ring-white/10">
@@ -96,6 +131,53 @@ export default function Classifier({ guard, onLogout }) {
   const listEl = useRef(null)
   const boxEl = useRef(null)
   const ghost = useRef(null)
+  const [zoom, setZoom] = useState(readZoom)
+  const scrollRatio = useRef(null) // keeps the list's place while the cards change size
+  const page = useRef(null)
+  const [split, setSplit] = useState(readSplit) // top section's share of the page
+  const [album, setAlbum] = useState(96) // series album side in px, follows the strip's height
+
+  function saveSplit(value) {
+    const v = clampSplit(value)
+    setSplit(v)
+    try {
+      localStorage.setItem('tad.classifySplit', String(v))
+    } catch {}
+  }
+
+  // drag the divider: the top section follows the pointer, saved on release
+  function startSplitDrag(e) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const el = e.currentTarget
+    el.setPointerCapture(e.pointerId)
+    let last = split
+    const move = (ev) => {
+      const r = page.current.getBoundingClientRect()
+      last = clampSplit((ev.clientY - r.top) / r.height)
+      setSplit(last)
+    }
+    const up = () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      el.removeEventListener('pointercancel', up)
+      saveSplit(last)
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', up)
+  }
+
+  // the albums fill the strip's height (minus the name under them)
+  useEffect(() => {
+    const el = strip.current
+    if (!el) return
+    const fit = () => setAlbum(Math.max(80, Math.min(640, Math.round(el.clientHeight - 70))))
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const actor = params.get('actor') || ''
   const q = params.get('q') || ''
@@ -271,6 +353,38 @@ export default function Classifier({ guard, onLogout }) {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [videos])
+
+  // ── card size: Shift + wheel over the list (down = smaller, up = bigger) or the slider ──
+  function changeZoom(next) {
+    const el = listEl.current
+    if (el) scrollRatio.current = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight)
+    setZoom((z) => clampZoom(typeof next === 'function' ? next(z) : next))
+  }
+
+  useEffect(() => {
+    const el = listEl.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (!e.shiftKey) return
+      const d = e.deltaY || e.deltaX // Chrome turns Shift + wheel into a sideways scroll (deltaX)
+      if (!d) return
+      e.preventDefault()
+      changeZoom((z) => z * Math.exp(-d * 0.0015)) // ~14 % per mouse notch, smooth on a touchpad
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  useLayoutEffect(() => {
+    try {
+      localStorage.setItem('tad.classifyZoom', String(zoom))
+    } catch {}
+    const el = listEl.current
+    if (el && scrollRatio.current != null) {
+      el.scrollTop = scrollRatio.current * (el.scrollHeight - el.clientHeight)
+      scrollRatio.current = null
+    }
+  }, [zoom])
 
   function stripDragOver(e) {
     const el = strip.current
@@ -460,9 +574,9 @@ export default function Classifier({ guard, onLogout }) {
   const backPath = `/classify${params.toString() ? `?${params}` : ''}`
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden">
-      {/* top quarter: series */}
-      <section className="flex h-1/4 min-h-48 shrink-0 flex-col border-b border-white/10 bg-neutral-950">
+    <div ref={page} className="flex h-[100dvh] flex-col overflow-hidden">
+      {/* top: series (a quarter of the page at first; drag the divider to resize) */}
+      <section style={{ height: `${split * 100}%` }} className="flex min-h-40 shrink-0 flex-col bg-neutral-950">
         <div className="flex flex-wrap items-center gap-3 px-4 pt-3">
           <h1 className="text-lg font-semibold">分類器</h1>
           <span className="text-sm text-neutral-400">{loading ? '' : `${series.length} 個系列`}</span>
@@ -485,7 +599,7 @@ export default function Classifier({ guard, onLogout }) {
             placeholder="搜尋系列…"
             className="w-40 rounded-lg bg-neutral-800 px-3 py-1.5 text-sm outline-none ring-1 ring-white/10 focus:ring-accent"
           />
-          <span className="hidden text-xs text-neutral-500 lg:inline">滾輪左右捲動 · 拖曳下方項目到系列加入 · 右鍵或 ✎ 改名</span>
+          <span className="hidden text-xs text-neutral-500 lg:inline">滾輪左右捲動 · 拖曳下方項目到系列加入 · 右鍵或 ✎ 改名 · 拖曳分隔線放大系列</span>
           <div className="ml-auto">
             <AppMenu onLogout={onLogout} />
           </div>
@@ -495,10 +609,12 @@ export default function Classifier({ guard, onLogout }) {
             {...dropProps('+')}
             onClick={() => newSeries(pickedIds)}
             title={picked.length ? `用已選的 ${picked.length} 個建立新系列` : '把項目拖到這裡建立新系列'}
-            className="flex w-28 shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl p-1.5 hover:bg-white/5"
+            style={{ width: Math.min(album, 140) + 16 }}
+            className="flex shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl p-1.5 hover:bg-white/5"
           >
             <div
-              className={`flex h-24 w-24 items-center justify-center rounded-2xl border-2 border-dashed text-3xl transition ${
+              style={{ width: Math.min(album, 140), height: Math.min(album, 140) }}
+              className={`flex items-center justify-center rounded-2xl border-2 border-dashed text-3xl transition ${
                 over === '+' ? 'scale-105 border-accent bg-accent/20 text-white' : 'border-white/20 text-neutral-500'
               }`}
             >
@@ -511,6 +627,7 @@ export default function Classifier({ guard, onLogout }) {
               key={s.name}
               name={s.name}
               items={s.items}
+              size={album}
               over={over === s.name}
               picked={picked.length}
               {...dropProps(s.name)}
@@ -527,7 +644,28 @@ export default function Classifier({ guard, onLogout }) {
         </div>
       </section>
 
-      {/* bottom three quarters: items without a series */}
+      {/* divider: drag to give the series more / less room (double-click: back to a quarter) */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="調整上下區塊大小"
+        aria-valuenow={Math.round(split * 100)}
+        tabIndex={0}
+        onPointerDown={startSplitDrag}
+        onDoubleClick={() => saveSplit(SPLIT_DEFAULT)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault()
+            saveSplit(split + (e.key === 'ArrowDown' ? 0.05 : -0.05))
+          }
+        }}
+        title="拖曳調整上下大小 · 雙擊回到預設"
+        className="group relative z-10 flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-white/10 bg-neutral-900 outline-none hover:bg-accent/30 focus-visible:bg-accent/30"
+      >
+        <span className="h-1 w-10 rounded-full bg-white/25 group-hover:bg-white/60" />
+      </div>
+
+      {/* bottom: items without a series */}
       <section className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-3 border-b border-white/5 px-4 py-2">
           <h2 className="text-sm font-medium">未分類</h2>
@@ -556,6 +694,20 @@ export default function Classifier({ guard, onLogout }) {
               只顯示「{actor}」的項目
             </label>
           )}
+          <label className="flex items-center gap-1.5 text-sm text-neutral-400" title="卡片大小（也可以在清單上 Shift + 滾輪縮放）">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+              <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="currentColor" />
+            </svg>
+            <input
+              type="range"
+              min={ZOOM_MIN}
+              max={ZOOM_MAX}
+              value={zoom}
+              onChange={(e) => changeZoom(Number(e.target.value))}
+              aria-label="卡片大小"
+              className="w-24 accent-accent"
+            />
+          </label>
           {processing > 0 && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300">產生資訊/截圖中：{processing}</span>}
           <div className="ml-auto flex items-center gap-2 text-sm">
             {picked.length > 0 ? (
@@ -566,7 +718,7 @@ export default function Classifier({ guard, onLogout }) {
                 </button>
               </>
             ) : (
-              <span className="hidden text-xs text-neutral-500 md:inline">點選 · Shift / Ctrl + 點選 · 空白處拖曳框選 · Ctrl + A 全選</span>
+              <span className="hidden text-xs text-neutral-500 md:inline">點選 · Shift / Ctrl + 點選 · 空白處拖曳框選 · Ctrl + A 全選 · Shift + 滾輪縮放</span>
             )}
           </div>
         </div>
@@ -578,10 +730,15 @@ export default function Classifier({ guard, onLogout }) {
               {videos.some((v) => !v.series) ? '沒有符合的項目' : '所有項目都已經加入系列了'}
             </p>
           ) : (
-            <div data-select-root className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7">
+            <div
+              data-select-root
+              className="grid"
+              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${zoom}px, 100%), 1fr))`, gap: zoom < COMPACT_BELOW ? 8 : 16 }}
+            >
               {shown.map((v) => (
                 <div key={v.id} onDoubleClick={() => navigate(`/v/${v.id}`, { state: { backPath } })}>
                   <VideoCard
+                    compact={zoom < COMPACT_BELOW}
                     video={v}
                     onMenu={itemMenu}
                     selecting

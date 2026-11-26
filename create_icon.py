@@ -39,7 +39,9 @@ def create_icon_file():
         
         # Save as ICO file
         ico_path = os.path.join('assets', 'icon.ico')
-        images[0].save(ico_path, format='ICO', sizes=icon_sizes, append_images=images[1:])
+        # save from the largest image: Pillow (13+) only writes sizes up to the saved image's own size, so
+        # saving the 16x16 one gave a single 16x16 entry and Inno Setup's icon update failed (EndUpdateResource 110)
+        images[-1].save(ico_path, format='ICO', sizes=icon_sizes, append_images=images[:-1])
         
         print(f"Icon file created: {ico_path}")
         return True

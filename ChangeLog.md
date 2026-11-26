@@ -1,12 +1,23 @@
 # ChangeLog
 
+## [3.7.2] - 2026-11-26 - Swipe Before Playing & Stream Fixes
+### Added
+- Video page: before pressing ▶, swipe sideways on the cover (touch), the new ‹ › buttons or ←/→ switch to the previous / next video in the library's order and stay on its screenshots (`VideoPage.jsx` `swipeTo(dir, play=false)`, `swipeNav()`)
+- Fix: switching videos (esp. live-transcoded ones) hung the page: a dropped `<video>` kept downloading and used up the browser's 6 connections (new `api.js` `releaseVideo()`, run when the Player's `<video>` is dropped); `media_stream` now always stops ffmpeg and drains its output after kill (`proc.communicate()`, `proc.wait()` never returned), and `_register_stream()` stops a viewer's oldest streams beyond `STREAMS_PER_VIEWER` = 2 (`STREAMS_TOTAL` = 4) (`library/server.py`)
+
+## [3.7.1] - 2026-11-26 - Hover Preview & Resizable Classifier
+### Added
+- Hover preview: resting the mouse 1 s on a video card (library card / list, 分類器) plays a muted clip of 6 x 1.5 s pieces at 360p, made on the first request and cached as `preview.mp4` in the shots folder (`VideoCard.jsx` `useHoverPreview()` / `PreviewVideo`, `media.make_preview()`, `GET /library/media/{id}/preview.mp4`, `Library.preview_source()`)
+- 分類器 draggable divider between the 系列 strip and the 未分類 list (drag, double-click = 1/4, ↑/↓ keys; 15-80 %, kept in `tad.classifySplit`); series albums grow with the strip and show more covers (2x2 / 3x3 / 4x4) (`Classifier.jsx`)
+
 ## [3.7.0] - 2026-11-26 - Series Classifier
 ### Added
-- New 🗂 分類器 page `/classify` in the ☰ menu (`Classifier.jsx`, `App.jsx`, `AppMenu.jsx`): top 1/4 = 系列 as folder-style cards (2x2 covers, name, count; one row scrolled with the mouse wheel; 主演 filter `?actor=`, series search `?sq=`, 「＋ 新系列」), bottom 3/4 = items without a 系列 (影片 / 圖片 / 全部, search, 「只顯示「X」的項目」)
+- New 🗂 分類器 page `/classify` in the ☰ menu (`Classifier.jsx`, `App.jsx`, `AppMenu.jsx`): top 1/4 = 系列 as folder-style cards (2x2 covers, name, count; one row scrolled with the mouse wheel; 主演 filter `?actor=`, series search `?sq=`, 「＋ 新系列」), bottom 3/4 = items without a 系列 (影片 / 圖片 / 全部, search, 「只顯示「X」的項目」; Shift + wheel or the slider resizes the cards, small ones show only the title)
 - Drag one item, a selection or a drag-select box onto a series card (or click the card with items selected, or 「＋ 新系列」 / 加入新系列 to name a new one) to set its 系列 via `api.batchUpdate`; the toast has 復原; ✎ / right-click renames a series (an existing name merges); click a card or double-click an item opens it in the library / item page
 - Rename a series on the library page: 「✎ 改名」 beside the 系列 filter (`Library.rename_series()` in `store.py`, `POST /library/api/series/rename`, `api.renameSeries()`); the filter follows the new name
 ### Fixed
 - Library routes answered 200 with `null` instead of the error when a request was refused (e.g. a bad folder name showed 「已重新命名」): aiohttp's `Response` is falsy, so `error or web.json_response(...)` always returned the success response; now `error if error is not None else ...` in every `_run` route (`server.py`)
+- Windows build stopped at Inno Setup "EndUpdateResource failed (110)": with Pillow 13 `create_icon.py` wrote an icon with only a 16x16 image; it now saves from the 256x256 image so all 6 sizes are written
 
 ## [3.6.3] - 2026-11-25 - Thread Limit & New Sorts
 ### Added

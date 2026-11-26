@@ -145,8 +145,9 @@ export default function VideoPage({ guard, onLogout }) {
     }
   }, [vnav.prev, vnav.next])
 
-  // videos: swiped on the player; the next one plays from the start (fullscreen stays on)
-  async function swipeTo(dir) {
+  // videos: swiped on the player -> the next one plays from the start (fullscreen stays on); swiped / ‹ › /
+  // ← → on the screenshots before playing -> the next one's screenshots (play = false)
+  async function swipeTo(dir, play = true) {
     const nid = vnav[dir]
     if (!nid) return
     if (!detailCache.has(nid)) {
@@ -154,10 +155,29 @@ export default function VideoPage({ guard, onLogout }) {
         remember(detailCache, nid, await api.video(nid))
       } catch {}
     }
-    navigate(`/v/${nid}`, { replace: true, state: { back: location.state?.back, resume: 0 } })
+    navigate(`/v/${nid}`, { replace: true, state: { back: location.state?.back, resume: play ? 0 : null } })
   }
 
-  // photos on touch screens: drag sideways to switch (the image follows the finger)
+  // videos before playing: ← / → switch video (while playing they seek)
+  useEffect(() => {
+    if (!video || video.kind === 'photo' || playFrom !== null || !(vnav.prev || vnav.next)) return
+    function onKey(e) {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.altKey || e.ctrlKey || e.metaKey) return
+      const dir = e.key === 'ArrowLeft' ? 'prev' : e.key === 'ArrowRight' ? 'next' : null
+      if (dir && vnav[dir]) {
+        e.preventDefault()
+        swipeTo(dir, false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [video?.id, playFrom, vnav.prev, vnav.next])
+
+  // touch screens: drag sideways to switch (the picture follows the finger): photos, and videos before
+  // they play (the player has its own swipe)
+  const swipeNav = () => (video?.kind === 'photo' ? video.neighbors || {} : vnav)
+  const swipedAt = useRef(0) // a swipe must not also count as a tap on the picture (= play)
+
   function onTouchStart(e) {
     swipe.current = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dir: null } : null
     if (!swipe.current) setDragX(0) // second finger: pinch zoom, not a swipe
@@ -171,18 +191,20 @@ export default function VideoPage({ guard, onLogout }) {
     if (!s.dir && Math.max(Math.abs(dx), Math.abs(dy)) > 8) s.dir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v'
     if (s.dir !== 'h') return
     s.dx = dx
-    const nav = video?.neighbors || {}
+    const nav = swipeNav()
     const edge = (dx > 0 && !nav.prev) || (dx < 0 && !nav.next)
-    setDragX(edge ? dx / 4 : dx) // resist at the first / last photo
+    setDragX(edge ? dx / 4 : dx) // resist at the first / last item
   }
 
   function onTouchEnd() {
     const s = swipe.current
     swipe.current = null
-    const nav = video?.neighbors || {}
-    if (s?.dir === 'h' && s.dx <= -SWIPE_MIN && nav.next) goTo(nav.next)
-    else if (s?.dir === 'h' && s.dx >= SWIPE_MIN && nav.prev) goTo(nav.prev)
-    else setDragX(0)
+    const nav = swipeNav()
+    const dir = s?.dir !== 'h' ? null : s.dx <= -SWIPE_MIN ? 'next' : s.dx >= SWIPE_MIN ? 'prev' : null
+    if (s?.dir === 'h') swipedAt.current = Date.now()
+    if (!dir || !nav[dir]) setDragX(0)
+    else if (video?.kind === 'photo') goTo(nav[dir])
+    else swipeTo(dir, false)
   }
 
   // screenshots / info still being generated: poll until ready
@@ -384,15 +406,66 @@ export default function VideoPage({ guard, onLogout }) {
             </div>
           ) : (
             <>
-              <button
-                onClick={() => setPlayFrom(0)}
-                className="group relative block aspect-video w-full overflow-hidden rounded-xl bg-neutral-900"
+              {/* before playing: swipe (touch), ‹ › or ← → switch video; the neighbor's cover slides in */}
+              <div
+                className="relative select-none overflow-hidden rounded-xl bg-neutral-900"
+                style={vnav.prev || vnav.next ? { touchAction: 'pan-y pinch-zoom' } : undefined}
+                onTouchStart={vnav.prev || vnav.next ? onTouchStart : undefined}
+                onTouchMove={vnav.prev || vnav.next ? onTouchMove : undefined}
+                onTouchEnd={vnav.prev || vnav.next ? onTouchEnd : undefined}
+                onTouchCancel={vnav.prev || vnav.next ? onTouchEnd : undefined}
               >
-                {video.shots[0] && <img src={video.shots[0]} alt="" className="h-full w-full object-cover opacity-80 transition group-hover:opacity-100" />}
-                <span className="absolute inset-0 flex items-center justify-center">
-                  <span className="flex h-20 w-20 items-center justify-center rounded-full bg-accent/90 text-3xl shadow-lg transition group-hover:scale-110">▶</span>
-                </span>
-              </button>
+                <div
+                  style={{ transform: dragX ? `translateX(${dragX}px)` : undefined }}
+                  className={`relative ${swipe.current ? '' : 'transition-transform duration-200'}`}
+                >
+                  {['prev', 'next'].map((dir) => {
+                    const url = dragX !== 0 && vnav[dir] ? detailCache.get(vnav[dir])?.shots?.[0] : null
+                    return (
+                      <div key={dir} className={`absolute inset-y-0 w-full bg-neutral-900 ${dir === 'prev' ? 'right-full' : 'left-full'}`}>
+                        {url && <img src={url} alt="" draggable={false} className="h-full w-full object-cover opacity-80" />}
+                      </div>
+                    )
+                  })}
+                  <button
+                    onClick={() => Date.now() - swipedAt.current > 400 && setPlayFrom(0)}
+                    className="group relative block aspect-video w-full"
+                  >
+                    {video.shots[0] && (
+                      <img key={video.id} src={video.shots[0]} alt="" draggable={false} className="h-full w-full object-cover opacity-80 transition group-hover:opacity-100" />
+                    )}
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <span className="flex h-20 w-20 items-center justify-center rounded-full bg-accent/90 text-3xl shadow-lg transition group-hover:scale-110">▶</span>
+                    </span>
+                  </button>
+                </div>
+                {vnav.prev && (
+                  <button
+                    onClick={() => swipeTo('prev', false)}
+                    className="absolute left-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80 pointer-coarse:hidden"
+                    aria-label="上一部"
+                    title="上一部（←）"
+                  >
+                    ‹
+                  </button>
+                )}
+                {vnav.next && (
+                  <button
+                    onClick={() => swipeTo('next', false)}
+                    className="absolute right-2 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-2xl hover:bg-black/80 pointer-coarse:hidden"
+                    aria-label="下一部"
+                    title="下一部（→）"
+                  >
+                    ›
+                  </button>
+                )}
+                {vnav.total > 1 && (
+                  <span className="pointer-events-none absolute right-2 top-2 rounded bg-black/70 px-2 py-0.5 text-xs tabular-nums">
+                    {vnav.index} / {vnav.total}
+                    <span className="hidden pointer-coarse:inline"> · 左右滑動切換</span>
+                  </span>
+                )}
+              </div>
               {video.shots.length > 0 ? (
                 <div className="grid grid-cols-3 gap-2">
                   {video.shots.map((src, i) => (

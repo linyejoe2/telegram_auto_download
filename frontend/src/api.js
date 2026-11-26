@@ -7,6 +7,17 @@ export const BASE = '/library'
 export const API = `${BASE}/api`
 export const MEDIA = `${BASE}/media`
 
+// Stop a <video> for good before React drops it: a removed element keeps downloading (a live transcode
+// never ends) until it is garbage collected, and the browser allows only 6 connections to the server.
+export function releaseVideo(el) {
+  if (!el) return
+  try {
+    el.pause()
+    el.removeAttribute('src')
+    el.load()
+  } catch {}
+}
+
 async function request(method, url, body) {
   const res = await fetch(url, {
     method,
