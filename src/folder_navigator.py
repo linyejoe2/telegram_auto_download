@@ -8,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 logger = logging.getLogger(__name__)
 
 MAX_PATH_HISTORY = 5
+MAX_TAG_HISTORY = 5      # 主演 / 系列 entries kept; the bot offers the 3 newest as buttons
 HISTORY_FILE = 'history.json'
 FOLDERS_PER_ROW = 2
 
@@ -68,17 +69,42 @@ class FolderNavigator:
         paths = self._read_history_file().get('folder_history', {}).get(str(user_id), [])
         return [p for p in paths if isinstance(p, str)][:MAX_PATH_HISTORY]
 
+    def _update_history_file(self, key: str, user_id: int, value: list):
+        data = self._read_history_file()        # re-read: another device may have written meanwhile
+        data.setdefault(key, {})[str(user_id)] = value
+        path = self._history_file()
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+
     def _save_history(self, user_id: int, history: List[str]):
         try:
-            data = self._read_history_file()        # re-read: another device may have written meanwhile
-            data.setdefault('folder_history', {})[str(user_id)] = history
-            path = self._history_file()
-            tmp = f"{path}.{os.getpid()}.tmp"
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, path)
+            self._update_history_file('folder_history', user_id, history)
         except Exception as e:
             logger.warning(f"儲存路徑歷史失敗: {e}")
+
+    # ─── 主演 / 系列 typed before a download (history.json "tag_history", v3.9.0) ──
+
+    def get_tag_history(self, user_id: int) -> List[dict]:
+        from src.download_tags import normalize
+        entries = self._read_history_file().get('tag_history', {}).get(str(user_id), [])
+        return [t for t in (normalize(e) for e in entries) if t][:MAX_TAG_HISTORY]
+
+    def remember_tags(self, user_id: int, tags: dict):
+        """Most recent first, without duplicates (compared case-insensitively)."""
+        from src.download_tags import normalize
+        tags = normalize(tags)
+        if not tags:
+            return
+
+        def key(t):
+            return ([a.lower() for a in t['actors']], t['series'].lower())
+        history = [tags] + [t for t in self.get_tag_history(user_id) if key(t) != key(tags)]
+        try:
+            self._update_history_file('tag_history', user_id, history[:MAX_TAG_HISTORY])
+        except Exception as e:
+            logger.warning(f"儲存主演 / 系列紀錄失敗: {e}")
 
     # ─── state helpers ───────────────────────────────────────────────────────
 

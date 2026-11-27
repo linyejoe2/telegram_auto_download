@@ -18,7 +18,7 @@ from telegram.ext import Application, MessageHandler, CallbackQueryHandler, Comm
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader, describe
 from .folder_navigator import FolderNavigator
-from . import chat_scanner
+from . import chat_scanner, download_tags
 from .records import DownloadRecords
 from .file_viewer import FileViewer, build_preview, build_batch_preview, build_frame_preview, probe_video, fmt_size
 from .video_loader import (find_ffmpeg, needs_compression, existing_compressed, compress_video,
@@ -70,7 +70,8 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telethon.client.updates').setLevel(logging.WARNING)
 
 
-# t.me/<username>/<id>, t.me/c/<channel id>/<id> (also .../<topic id>/<id>), optional ?single
+# t.me/<username>/<id>, t.me/c/<channel id>/<id> (also .../<topic id>/<id>); a query such as ?single
+# (added when copying the link of one item of an album) is ignored: the whole post is downloaded
 _TME_RE = re.compile(
     r'https?://(?:www\.)?(?:t|telegram)\.me/(?:c/(?P<cid>\d+)|(?P<user>[A-Za-z][A-Za-z0-9_]{3,}))'
     r'/(?:\d+/)?(?P<mid>\d+)(?P<query>\?\S*)?',
@@ -79,12 +80,11 @@ _TME_RE = re.compile(
 
 
 def parse_tme_link(text: str):
-    """{'cid', 'user', 'mid', 'single'} for the first t.me message link in `text`, else None."""
+    """{'cid', 'user', 'mid'} for the first t.me message link in `text`, else None."""
     m = _TME_RE.search(text or '')
     if not m:
         return None
-    return {'cid': m.group('cid'), 'user': m.group('user'), 'mid': int(m.group('mid')),
-            'single': 'single' in (m.group('query') or '').lower()}
+    return {'cid': m.group('cid'), 'user': m.group('user'), 'mid': int(m.group('mid'))}
 
 
 @dataclass
@@ -115,6 +115,7 @@ class TelegramMediaBot:
         self._items = deque()
         self._item_event = asyncio.Event()
         self._current_item = None
+        self._tag_prompts = {}           # user id -> {'answer': future, 'recent': [...]}: 主演 / 系列 step
         self.queue_task = None
         self.scan_task = None
         self.rescan_task = None
@@ -276,14 +277,17 @@ class TelegramMediaBot:
             logger.error(f'無法獲取訊息 {message_id}: {e}')
             return None, []
 
+        return original, await self._replies(chat, message_id)
+
+    async def _replies(self, chat, message_id) -> list:
+        """Replies to a message (a channel post's comments); [] when it has none or they can't be read."""
         replies = []
         try:
             async for r in self.client.iter_messages(chat, reply_to=message_id):
                 replies.append(r)
         except Exception as e:
             logger.warning(f'獲取回覆失敗，但繼續處理: {e}')
-
-        return original, replies
+        return replies
 
     async def _collect_media_from_original(self, chat_id, original_message, expected_size: int = None, search_range: int = 50):
         """
@@ -427,6 +431,10 @@ class TelegramMediaBot:
             await self._cancel_current(user_id, query.message)
             return
 
+        if data == "fn_tskip" or data.startswith("fn_tag:"):     # 主演 / 系列 step (after the folder)
+            await self._handle_tag_callback(user_id, query)
+            return
+
         if not self.folder_navigator.is_awaiting_folder_selection(user_id):
             await query.answer("此操作已過期，請重新發送媒體文件", show_alert=True)
             return
@@ -481,6 +489,18 @@ class TelegramMediaBot:
             else:
                 await msg.reply_text(text, reply_markup=markup)
             return
+
+        # 主演 / 系列 typed for the download waiting after its folder was confirmed
+        # (a link or a forwarded post is a new request, not an answer)
+        if (user_id in self._tag_prompts and msg.text and not msg.forward_origin
+                and not parse_tme_link(msg.text) and not url_parser.extract_url(msg.text)):
+            tags = download_tags.parse(msg.text)
+            if self._answer_tags(user_id, tags):
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                return
 
         # t.me message link: read through the logged-in Telethon account (works for "restrict saving content" chats)
         link = parse_tme_link(msg.text) if msg.text else None
@@ -598,12 +618,25 @@ class TelegramMediaBot:
                 await processing_msg.edit_text('❌ 讀取不到這則訊息：請確認登入的帳號可以看到它（需已加入該頻道/群組）')
                 return
 
-            if link['single']:
-                messages = [original] if getattr(original, 'media', None) else []
+            # the whole post: every photo / video of its album, even for a link copied from one item of
+            # the album (Telegram adds ?single to those, which used to download only that item). A post
+            # that isn't an album is only itself (the nearby-album guess is for forwarded albums).
+            single = [original] if getattr(original, 'media', None) else []
+            if getattr(original, 'grouped_id', None):
+                messages = await self._collect_media_from_original(peer, original) or single
             else:
-                messages = await self._collect_media_from_original(peer, original) or (
-                    [original] if getattr(original, 'media', None) else [])
-                messages += [r for r in replies if getattr(r, 'media', None) and r not in messages]
+                messages = single
+            # replies / comments, also those under the album's other items
+            for m in messages:
+                if m.id != original.id:
+                    replies += await self._replies(peer, m.id)
+            album = len(messages)
+            seen = {(m.chat_id, m.id) for m in messages}     # comments live in another chat (ids may repeat)
+            for r in replies:
+                if getattr(r, 'media', None) and (r.chat_id, r.id) not in seen:
+                    seen.add((r.chat_id, r.id))
+                    messages.append(r)
+            logger.info(f"t.me 連結 {link['mid']}：貼文 {album} 個媒體、回覆 {len(messages) - album} 個")
             describe(messages, root=original)
 
             if not messages:
@@ -730,6 +763,9 @@ class TelegramMediaBot:
             result += f"下載大小: {stats['downloaded_size']/(1024**2):.1f}MB\n"
 
         result += f"平均速度: {avg_speed:.1f}MB/s\n耗時: {elapsed:.1f}秒\n剩餘空間: {disk['free_gb']:.1f}GB\n儲存位置: {download_dir}"
+        tags = download_tags.describe(download_tags.current())
+        if tags:
+            result += f"\n{tags}"
 
         await processing_msg.edit_text(result)
         logger.info(f"下載完成 - 成功: {stats['completed_files']}, 失敗: {stats['failed_files']}, 大小: {stats['downloaded_size']/(1024**2):.1f}MB, 速度: {avg_speed:.1f}MB/s")
@@ -1021,13 +1057,88 @@ class TelegramMediaBot:
             item.future.set_result(None)
             return
 
-        await message.edit_text(f"📁 已確認存放位置: {display_path}\n🚀 開始下載...")
-        item.future.set_result(runner)
+        item.future.set_result(self._ask_tags_then(user_id, message, display_path, runner))
+
+    # ---------------------- 主演 / 系列 before downloading (v3.9.0) ----------------------
+    TAG_TIMEOUT = 10 * 60   # no answer: download without 主演 / 系列
+
+    def _ask_tags_then(self, user_id: int, message, display_path: str, runner):
+        """Runner for the queue worker: ask for 主演 / 系列 (one message, two lines) or 跳過, then run
+        the download with them set, so every file it records gets them (src/download_tags.py)."""
+        async def ask_and_run():
+            answer = asyncio.get_running_loop().create_future()
+            recent = self.folder_navigator.get_tag_history(user_id)[:3]
+            self._tag_prompts[user_id] = {'answer': answer, 'recent': recent}
+            try:
+                await message.edit_text(self._tag_prompt_text(display_path),
+                                        reply_markup=self._tag_prompt_markup(recent))
+                tags = await asyncio.wait_for(answer, self.TAG_TIMEOUT)
+            except asyncio.TimeoutError:
+                tags = None
+            finally:
+                if self._tag_prompts.get(user_id, {}).get('answer') is answer:
+                    del self._tag_prompts[user_id]
+            if tags is False:       # ❌ 取消
+                return
+            if tags:
+                self.folder_navigator.remember_tags(user_id, tags)
+            line = download_tags.describe(tags)
+            await self._safe_edit(message, f"📁 已確認存放位置: {display_path}\n"
+                                           + (f"🎭 {line}\n" if line else "") + "🚀 開始下載...")
+            token = download_tags.use(tags)
+            try:
+                await runner()
+            finally:
+                download_tags.reset(token)
+        return ask_and_run
+
+    @staticmethod
+    def _tag_prompt_text(display_path: str) -> str:
+        return (
+            f"📁 已確認存放位置: {display_path}\n\n"
+            "🎭 要加上主演 / 系列嗎？直接發送一則訊息：\n"
+            "第一行：主演（多位用逗號或頓號分隔）\n"
+            "第二行：系列（可省略）\n\n"
+            "例如：\n王小明、陳小美\n夏日海灘\n\n"
+            "只填系列時第一行打「-」；不需要就按「跳過」"
+        )
+
+    @staticmethod
+    def _tag_prompt_markup(recent: list) -> InlineKeyboardMarkup:
+        keyboard = []
+        for i, tags in enumerate(recent):
+            label = f"🕐 {download_tags.describe(tags)}"
+            keyboard.append([InlineKeyboardButton(label[:40] + ('…' if len(label) > 40 else ''),
+                                                  callback_data=f"fn_tag:{i}")])
+        keyboard.append([InlineKeyboardButton("⏭ 跳過，直接下載", callback_data="fn_tskip")])
+        keyboard.append([InlineKeyboardButton("❌ 取消（不下載）", callback_data="fn_cancel")])
+        return InlineKeyboardMarkup(keyboard)
+
+    def _answer_tags(self, user_id: int, tags) -> bool:
+        """tags: dict, None = 跳過, False = 取消. False when no prompt is waiting."""
+        prompt = self._tag_prompts.pop(user_id, None)
+        if not prompt or prompt['answer'].done():
+            return False
+        prompt['answer'].set_result(tags)
+        return True
+
+    async def _handle_tag_callback(self, user_id: int, query):
+        data = query.data
+        tags = None
+        if data.startswith("fn_tag:"):
+            recent = self._tag_prompts.get(user_id, {}).get('recent') or []
+            try:
+                tags = recent[int(data[7:])]
+            except (ValueError, IndexError):
+                tags = None
+        if not self._answer_tags(user_id, tags):
+            await self._safe_edit(query.message, "此操作已過期，請重新發送媒體文件")
 
     async def _cancel_current(self, user_id: int, message):
         """User skipped the current item: drop it so the next queued item can proceed."""
         item = self._current_item
         self._abandon_flow(user_id)
+        self._answer_tags(user_id, False)       # cancelled at the 主演 / 系列 step
         if item and item.user_id == user_id and item.future and not item.future.done():
             item.future.set_result(None)
         await self._safe_edit(message, "❎ 已取消，不會下載這個項目")
@@ -1313,6 +1424,7 @@ class TelegramMediaBot:
         title = job['title']
         rel = os.path.relpath(folder, base)
         job['folder'] = '' if rel == '.' else rel.replace(os.sep, '/')
+        job['tags'] = download_tags.current()        # 主演 / 系列: kept for a resume after a restart
         chat_scanner.save_job(base, job)
         run = {'chat_id': str(job['chat_id']), 'stopped': False, 'task': None}
         self._chat_run = run
@@ -1445,7 +1557,8 @@ class TelegramMediaBot:
                 if os.path.commonpath([os.path.abspath(folder), base]) != base:
                     folder = base                        # never write outside the downloads folder
                 job = {'chat_id': int(job['chat_id']), 'title': str(job.get('title') or job['chat_id']),
-                       'user_id': int(job.get('user_id') or self.owner_id), 'started': job.get('started')}
+                       'user_id': int(job.get('user_id') or self.owner_id), 'started': job.get('started'),
+                       'tags': download_tags.normalize(job.get('tags'))}
             except (KeyError, TypeError, ValueError) as e:
                 logger.warning(f"略過無法讀取的頻道下載工作: {e}")
                 continue
@@ -1457,7 +1570,11 @@ class TelegramMediaBot:
     async def _present_resumed_chat_job(self, item: FlowItem, job: dict, folder: str):
         item.message = await self.app.bot.send_message(
             chat_id=item.user_id, text=f"⏯ 繼續上次未完成的下載：「{job['title']}」→ {folder}")
-        await self._run_chat_download(job, folder, item.message)
+        token = download_tags.use(job.get('tags'))
+        try:
+            await self._run_chat_download(job, folder, item.message)
+        finally:
+            download_tags.reset(token)
 
     # ---------------------- utilities ----------------------
     def notify_owner_threadsafe(self, loop, text: str):

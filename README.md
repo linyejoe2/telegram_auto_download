@@ -1,4 +1,4 @@
-# Telegram Auto Download Bot v3.8.0
+# Telegram Auto Download Bot v3.9.0
 
 A high-performance Telegram bot that automatically downloads and backs up media from forwarded messages, media groups, and replies. Supports both CLI and GUI with interactive folder navigation, download-record tracking, and real-time progress.
 
@@ -59,13 +59,16 @@ The Diagnostics tab (v3.6.1) shows live CPU use per thread and child process and
 - **Classifier Canvas (v3.8.0)**  
   The 分類器's unclassified items are now a free canvas: every item shows its whole picture (portrait videos are no longer cropped) in neat rows. Drag items anywhere or onto a series, drag on empty space to box-select, scroll to pan, Shift + scroll or pinch to zoom (10 %–400 %), and use 「排列」 (最新加入 / 依標題) to tidy everything up again.
 
+- **Download tags & whole t.me posts (v3.9.0)**  
+  After you confirm the folder, the bot asks for 主演 / 系列 (one message, or tap a recent combination, or skip); the tags are saved with every downloaded file so the web library and 人物資料庫 pick them up. t.me links now always download the whole post (every item of an album plus media replies).
+
 ---
 
 ## 🚀 Quick Start
 
 ### ✅ Recommended: Windows Installer
 
-1. **Download** `TelegramAutoDownload-Setup-v3.8.0.exe` from Releases  
+1. **Download** `TelegramAutoDownload-Setup-v3.9.0.exe` from Releases  
 2. **Install** — No Python required  
 3. **Launch** the app, configure API credentials in GUI  
 4. **Run** the bot (minimizes to system tray)
@@ -152,11 +155,30 @@ Forward any media to the bot. An inline keyboard appears automatically:
 |---|---|
 | `📁 FolderName` | Enter that subfolder |
 | `⬆️ 返回上級` | Go up one level (hidden at root) |
-| `✅ 確認這裡` | Confirm current location and start download |
+| `✅ 確認這裡` | Confirm current location, then the 主演 / 系列 step (below) before the download starts |
 | `📝 新建資料夾` | Prompt to type a new folder name |
 | `🕐 /prev/path` | Jump to a previously used path |
 
 Up to 5 previously confirmed paths are remembered and shown as quick-select buttons.
+
+### 主演 / 系列 step (v3.9.0)
+
+After `✅ 確認這裡` the same message asks for 主演 / 系列. Send one message (your message is deleted afterwards):
+
+```
+王小明、陳小美
+夏日海灘
+```
+
+Line 1 = 主演 (several names separated by `,` `，` `、` `/` `;` `&`), line 2 = 系列 (optional); use `-` to leave a field empty (e.g. `-` then the series), or labelled lines `主演：…` / `系列：…` in any order.
+
+| Button | Action |
+|---|---|
+| `🕐 主演：… ｜ 系列：…` | Reuse one of the 3 latest combinations (up to 5 are remembered) |
+| `⏭ 跳過，直接下載` | Download without tags |
+| `❌ 取消（不下載）` | Cancel this item |
+
+No answer within 10 minutes downloads without tags. The tags are written into every downloaded file's record (主演 is merged with existing ones, 系列 is set), so the web library and 人物資料庫 show them; it works for forwards, albums, t.me links, YouTube / X / Pornhub, X accounts, `/chats` and the startup scan. Files skipped as already downloaded and re-downloads from 下載紀錄 are not tagged.
 
 ## 🌐 URL Video Download
 
@@ -190,7 +212,7 @@ After the mode, the usual folder keyboard appears. Output goes to `<folder>/x_<u
 
 ## 🔗 t.me Link Download
 
-Send a Telegram message link (`https://t.me/<channel>/<id>` or `https://t.me/c/<id>/<id>`, owner only) and the bot reads it with the logged-in account, so channels that block forwarding ("restrict saving content") can still be backed up, as long as that account can see the message. `?single` downloads only that message; otherwise the whole album and media replies are included. Then choose the folder as usual.
+Send a Telegram message link (`https://t.me/<channel>/<id>` or `https://t.me/c/<id>/<id>`, owner only) and the bot reads it with the logged-in account, so channels that block forwarding ("restrict saving content") can still be backed up, as long as that account can see the message. The whole post is always downloaded: every photo / video of the album (a `?single` link copied from one item of an album is treated the same) plus media replies / comments, including those under the album's other items; a post that isn't an album is only itself. Then choose the folder (and 主演 / 系列) as usual.
 
 ## 📚 Chat Download (/chats)
 

@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from library import media
+from src import download_tags
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +452,7 @@ class DownloadRecords:
                        if previous and k in (previous.get('library') or {})}
             if description and description.strip() and not restore.get('description'):
                 restore['description'] = description.strip()[:5000]
-            media.set_download(path, record, restore)
+            media.set_download(path, record, restore, download_tags.current())   # 主演 / 系列 typed in the bot
             with self._lock:
                 self._live[uid] = path
                 self._recs[path] = record

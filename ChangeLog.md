@@ -1,5 +1,14 @@
 # ChangeLog
 
+## [3.9.0] - 2026-11-26 - Download Tags & Whole t.me Posts
+### Added
+- Bot asks for 主演 / 系列 after 「✅ 確認這裡」: answer with one message (line 1 主演 separated by `,` `，` `、` `/` `;` `&`, line 2 系列 optional, 「-」 = empty, labelled `主演：` / `系列：` lines also work), tap one of the 3 latest 🕐 combinations (`tag_history` in `history.json`, max 5 per user), ⏭ 跳過 or ❌ 取消; no answer in 10 min (`TAG_TIMEOUT`) downloads without tags (`bot.py` `_ask_tags_then()` / `_answer_tags()` / `_handle_tag_callback()`, `FolderNavigator.get_tag_history()` / `remember_tags()`)
+- Applies to every flow with the folder selector (forward, album, t.me link, YouTube / X / Pornhub, X account, `/chats`, startup scan / `/rescan`): the tags travel in a context variable (new `src/download_tags.py` `parse()` / `describe()` / `use()` / `current()`) and `DownloadRecords.record_download()` -> `media.set_download(..., tags)` writes them into each file's sidecar, so the library / 人物資料庫 see them; `/chats` jobs keep `tags` in `chat_jobs.json` for a resume; already-downloaded skips and 下載紀錄 re-downloads are not tagged; the completion message shows the tags
+### Changed
+- t.me links download the whole post: `?single` is ignored so every photo / video of the album is fetched, and replies under the album's other items are included (`bot.py` `_replies()`, `parse_tme_link()` no longer returns `single`)
+### Fixed
+- A t.me link to a post that isn't an album picked the largest album nearby, i.e. another post's media; now only the post itself is downloaded (`_handle_tme_link()`)
+
 ## [3.8.0] - 2026-11-26 - Classifier Canvas
 ### Added
 - 分類器's 未分類 section is a canvas (`ClassifierCanvas.jsx`): each item shows its whole picture (object-contain, portrait videos stay recognisable) in justified rows, title under it, accent ring + ✓ when selected; the shape follows the loaded cover when it differs from the recorded size by > 8 % (rotated phone videos)

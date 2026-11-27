@@ -143,6 +143,8 @@ def save_job(base: str, job: dict):
         jobs = load_jobs(base)
         saved = {k: job[k] for k in ('chat_id', 'title', 'folder', 'user_id')}
         saved['started'] = job.get('started') or datetime.now().isoformat(timespec='seconds')
+        if job.get('tags'):
+            saved['tags'] = job['tags']          # 主演 / 系列 typed before the download (v3.9.0)
         jobs[str(job['chat_id'])] = saved
         _write_jobs(base, jobs)
     except Exception as e:

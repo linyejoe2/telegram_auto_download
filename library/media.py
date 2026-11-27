@@ -162,15 +162,21 @@ def save_meta(video: str, meta: dict):
         _write_sidecar(video, data)
 
 
-def set_download(video: str, record: dict, defaults: Optional[dict] = None):
+def set_download(video: str, record: dict, defaults: Optional[dict] = None, tags: Optional[dict] = None):
     """Store the bot's download record in the file's sidecar (creating it if needed);
-    `defaults` fill library fields that aren't set yet (e.g. a title kept from before a deletion)."""
+    `defaults` fill library fields that aren't set yet (e.g. a title kept from before a deletion);
+    `tags` ({actors, series} typed in the bot before the download) add 主演 and set 系列."""
     with _meta_lock:
         data = read_sidecar(video) or {'version': META_VERSION}
         data['download'] = record
         for key, value in (defaults or {}).items():
             if not data.get(key):
                 data[key] = value
+        if tags:
+            if tags.get('actors'):
+                data['actors'] = clean_tags(list(data.get('actors') or []) + list(tags['actors']))
+            if tags.get('series'):
+                data['series'] = tags['series']
         _write_sidecar(video, data)
 
 
