@@ -13,8 +13,10 @@ from telethon import TelegramClient
 from telethon.errors import FloodWaitError, RPCError
 from telethon.tl.types import DocumentAttributeVideo, PeerChannel
 from telegram import Update, BotCommand, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import RetryAfter
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
 
+from . import flood_gate
 from .monitor import DownloadMonitor
 from .downloader import MediaDownloader, describe
 from .folder_navigator import FolderNavigator
@@ -87,6 +89,9 @@ def parse_tme_link(text: str):
     return {'cid': m.group('cid'), 'user': m.group('user'), 'mid': int(m.group('mid'))}
 
 
+_BACKGROUND = set()   # delayed edits waiting for a Telegram flood wait to end
+
+
 @dataclass
 class FlowItem:
     """One request waiting for its turn to ask the user for a folder, then download.
@@ -99,6 +104,7 @@ class FlowItem:
     message: object
     present: Callable[[], Awaitable[None]]
     future: object = None   # resolved by the folder confirmation with a download runner, or None = cancelled
+    flood_retries: int = 0  # times this item was put back because Telegram rate-limited the bot (v3.9.1)
 
 
 class TelegramMediaBot:
@@ -119,7 +125,8 @@ class TelegramMediaBot:
         self.queue_task = None
         self.scan_task = None
         self.rescan_task = None
-        self._scan_items = {}            # scan unit key -> its queued FlowItem (no duplicates on /rescan)
+        self._flood_rescan = None        # rescan scheduled for the end of a Telegram flood wait (v3.9.1)
+        self._scan_items = {}          # scan unit key -> its queued FlowItem (no duplicates on /rescan)
 
         # file viewer (/files): browse / preview / delete downloaded files - owner only
         self.owner_id = None
@@ -169,12 +176,14 @@ class TelegramMediaBot:
         self.bot_token = bot_token
 
         # Bot Application (python-telegram-bot)
-        self.app = Application.builder().token(bot_token).build()
+        # FloodGate: after "Flood control exceeded" nothing is posted to that chat until the wait is over
+        self.app = Application.builder().token(bot_token).rate_limiter(flood_gate.FloodGate()).build()
         self.app.add_handler(CommandHandler('files', self.handle_files_command))
         self.app.add_handler(CommandHandler('rescan', self.handle_rescan_command))
         self.app.add_handler(CommandHandler('chats', self.handle_chats_command))
         self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.app.add_handler(MessageHandler(filters.ALL, self.handle_message))
+        self.app.add_error_handler(self._on_handler_error)
 
     # ---------------------- startup ----------------------
     async def start_client(self, gui_root=None):
@@ -563,7 +572,11 @@ class TelegramMediaBot:
         logger.info(f'開始處理媒體組 {media_group_id}，包含 {len(msgs)} 個消息')
 
         primary = msgs[0]
-        processing_msg = await primary.reply_text(f'🔄 正在分析媒體組 ({len(msgs)} 個文件)，請稍候...')
+        try:
+            processing_msg = await primary.reply_text(f'🔄 正在分析媒體組 ({len(msgs)} 個文件)，請稍候...')
+        except RetryAfter:
+            self._rescan_after_flood()      # runs in a task, not a handler: the error handler won't see it
+            return
 
         # extract forward info
         from telegram import MessageOriginChannel, MessageOriginChat
@@ -604,9 +617,11 @@ class TelegramMediaBot:
                 partial(self._prepare_folder_selection, user_id, messages_to_download, processing_msg),
             )
 
+        except RetryAfter:
+            self._rescan_after_flood()
         except Exception as e:
             logger.error(f'處理媒體組錯誤: {e}')
-            await processing_msg.edit_text(f'❌ 處理媒體組時出錯: {e}')
+            await self._safe_edit(processing_msg, f'❌ 處理媒體組時出錯: {e}')
 
     async def _handle_tme_link(self, msg, user_id: int, link: dict):
         """Download the media behind a t.me link with the user account's session (the owner's own login)."""
@@ -706,7 +721,7 @@ class TelegramMediaBot:
             await self._download_and_monitor(processing_msg, messages_to_download, selected_folder, original_message_id, chat_name)
         except Exception as e:
             logger.error(f'開始下載時出錯: {e}')
-            await processing_msg.edit_text(f'❌ 開始下載時出錯: {e}')
+            await self._safe_edit(processing_msg, f'❌ 開始下載時出錯: {e}')
 
     async def _download_and_monitor(self, processing_msg, messages_to_download, download_dir, original_message_id, chat_name):
         # init stats
@@ -722,14 +737,15 @@ class TelegramMediaBot:
         self.monitor.start_monitoring_thread(download_dir, processing_msg)
 
         try:
-            await processing_msg.edit_text('📊 正在分析媒體文件...')
+            # status edits never stop the download (e.g. when Telegram rate-limits the bot)
+            await self._safe_edit(processing_msg, '📊 正在分析媒體文件...')
             total_size = 0
             for m in messages_to_download:
                 if getattr(m, 'media', None):
                     total_size += self.downloader.get_media_size(m)
 
             total_size_mb = total_size / (1024**2)
-            await processing_msg.edit_text(f'🚀 開始下載 {len(messages_to_download)} 個媒體文件，總大小: {total_size_mb:.1f}MB...')
+            await self._safe_edit(processing_msg, f'🚀 開始下載 {len(messages_to_download)} 個媒體文件，總大小: {total_size_mb:.1f}MB...')
 
             # 設定訊息回調函數，讓下載器可以發送新訊息
             async def send_message_to_user(text):
@@ -767,7 +783,7 @@ class TelegramMediaBot:
         if tags:
             result += f"\n{tags}"
 
-        await processing_msg.edit_text(result)
+        await self._edit_when_allowed(processing_msg, result)
         logger.info(f"下載完成 - 成功: {stats['completed_files']}, 失敗: {stats['failed_files']}, 大小: {stats['downloaded_size']/(1024**2):.1f}MB, 速度: {avg_speed:.1f}MB/s")
 
     # ---------------------- file viewer (/files) ----------------------
@@ -958,6 +974,7 @@ class TelegramMediaBot:
     # Items wait here until it is their turn to ask the user for a folder. The next
     # folder selector pops up only after the previous item's download has finished.
     SELECT_TIMEOUT = 30 * 60  # give up on an unanswered folder prompt so it can't block the queue forever
+    FLOOD_RETRIES = 3         # times an item is shown again after Telegram rate-limited the bot
 
     async def submit_flow(self, user_id: int, label: str, message, present):
         await self.enqueue_flow(FlowItem(label, user_id, message, present))
@@ -996,9 +1013,11 @@ class TelegramMediaBot:
 
             item = self._items.popleft()
             self._current_item = item
-            for position, waiting in enumerate(list(self._items)[:10], start=1):
-                await self._safe_edit(waiting.message, self._queue_text(waiting, position))
+            if not flood_gate.blocked_for(item.user_id):
+                for position, waiting in enumerate(list(self._items)[:10], start=1):
+                    await self._safe_edit(waiting.message, self._queue_text(waiting, position))
 
+            pause = 0.0
             try:
                 logger.info(f"輪到佇列項目: {item.label}")
                 item.future = asyncio.get_running_loop().create_future()
@@ -1013,6 +1032,17 @@ class TelegramMediaBot:
                 await self._safe_edit(item.message, "⌛ 等待選擇資料夾逾時，已取消這個項目")
             except asyncio.CancelledError:
                 raise
+            except RetryAfter as e:
+                # Telegram blocked the bot's messages for a while: the user never saw this item's prompt,
+                # so put it back at the front and show it again once the wait is over (v3.9.1)
+                self._abandon_flow(item.user_id)
+                if item.flood_retries < self.FLOOD_RETRIES:
+                    item.flood_retries += 1
+                    self._items.appendleft(item)
+                    pause = max(flood_gate.blocked_for(item.user_id), flood_gate.seconds_of(e), 1.0)
+                    logger.warning(f"Telegram 限流，{pause:.0f} 秒後重新顯示佇列項目: {item.label}")
+                else:
+                    logger.error(f"佇列項目因 Telegram 限流放棄 ({item.label}): {e}")
             except Exception as e:
                 logger.error(f"佇列項目失敗 ({item.label}): {e}")
                 self._abandon_flow(item.user_id)
@@ -1020,6 +1050,8 @@ class TelegramMediaBot:
             finally:
                 self._current_item = None
                 item.future = None
+            if pause:
+                await asyncio.sleep(pause)
 
     async def _confirm_selection(self, user_id: int, message):
         """Folder confirmed for the current item: hand the worker what it needs to download."""
@@ -1152,6 +1184,22 @@ class TelegramMediaBot:
         except Exception:
             pass  # unchanged text, deleted message, rate limit...
 
+    async def _edit_when_allowed(self, message, text: str):
+        """Edit now; if Telegram is rate-limiting the bot, edit once the wait is over (in the background),
+        so a result message such as 下載完成 isn't lost."""
+        try:
+            await message.edit_text(text)
+        except RetryAfter as e:
+            async def later():
+                await asyncio.sleep(max(flood_gate.blocked_for(message.chat_id), flood_gate.seconds_of(e), 1.0))
+                await self._safe_edit(message, text)
+            task = asyncio.create_task(later())
+            _BACKGROUND.add(task)               # keep a reference until it has run
+            task.add_done_callback(_BACKGROUND.discard)
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                logger.warning(f"更新訊息失敗: {e}")
+
     # ---------------------- startup scan ----------------------
     def _is_media_downloaded(self, message) -> bool:
         """True if downloaded before (even if deleted since), or if it has no downloadable photo/document."""
@@ -1255,7 +1303,10 @@ class TelegramMediaBot:
             units = await self._find_undownloaded(sent)
             waiting = {k: i for k, i in self._scan_items.items() if self._scan_item_active(i)}
             self._scan_items = waiting
-            fresh = [u for u in units if self._scan_key(u) not in waiting]
+            # links sent live and still in the queue are not queued a second time either
+            queued_links = {i.label for i in [self._current_item, *self._items] if i is not None}
+            fresh = [u for u in units if self._scan_key(u) not in waiting
+                     and not (u[0] == 'url' and u[1] in queued_links)]
 
             if not fresh:
                 logger.info('掃描：沒有新的未下載項目')
@@ -1267,11 +1318,15 @@ class TelegramMediaBot:
                 return
 
             title = "重新掃描" if manual else "啟動掃描"
-            await self.app.bot.send_message(
-                chat_id=me.id,
-                text=(f"🔎 {title}（最近 {len(sent)} 則訊息）發現 {len(fresh)} 個項目尚未下載。\n"
-                      f"會逐一詢問存放位置，每個項目下載完成後才出現下一個；不想下載的可按「❌ 取消」略過。"),
-            )
+            try:
+                await self.app.bot.send_message(
+                    chat_id=me.id,
+                    text=(f"🔎 {title}（最近 {len(sent)} 則訊息）發現 {len(fresh)} 個項目尚未下載。\n"
+                          f"會逐一詢問存放位置，每個項目下載完成後才出現下一個；不想下載的可按「❌ 取消」略過。"),
+                )
+            except RetryAfter as e:
+                # rate-limited: queue the items anyway, the queue shows them once the wait is over
+                logger.warning(f"掃描摘要未發送（Telegram 限流 {flood_gate.seconds_of(e):.0f} 秒），項目仍加入佇列")
             for unit in fresh:
                 item = FlowItem(unit[1], me.id, None, None)
                 item.present = partial(self._present_scan_unit, item, unit)
@@ -1287,6 +1342,31 @@ class TelegramMediaBot:
                     await self.app.bot.send_message(chat_id=self.owner_id, text=f"❌ 重新掃描失敗: {e}")
                 except Exception:
                     pass
+
+    async def _on_handler_error(self, update, context: ContextTypes.DEFAULT_TYPE):
+        """Error handler of the Bot API handlers. A request that arrived while Telegram was rate-limiting
+        the bot got no answer (the reply failed): rescan once the wait is over, so forwarded posts and
+        YouTube / X links sent meanwhile are queued then (v3.9.1)."""
+        error = context.error
+        if isinstance(error, RetryAfter):
+            self._rescan_after_flood()
+            return
+        logger.error(f"處理 Telegram 更新時出錯: {error}", exc_info=error)
+
+    def _rescan_after_flood(self):
+        if self._flood_rescan and not self._flood_rescan.done():
+            return
+        wait = flood_gate.blocked_for() + 2
+        logger.warning(f"Telegram 限流中，這段期間收到的訊息會在 {wait:.0f} 秒後重新掃描並加入佇列"
+                       f"（t.me 連結請在之後重新傳送）")
+
+        async def later():
+            await asyncio.sleep(wait)
+            while flood_gate.blocked_for() > 0:      # the wait got longer meanwhile
+                await asyncio.sleep(flood_gate.blocked_for() + 2)
+            logger.info("Telegram 限流結束，重新掃描限流期間收到的訊息")
+            await self._scan_recent(get_startup_scan_count() or 30)
+        self._flood_rescan = asyncio.create_task(later())
 
     async def handle_rescan_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Owner-only /rescan [count]: run the startup scan again on demand."""

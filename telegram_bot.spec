@@ -125,6 +125,7 @@ hiddenimports = [
     'library.people',
     'src.video_loader',
     'src.diagnostics',
+    'web.post_text',
 
     # custom
     'imagehash',

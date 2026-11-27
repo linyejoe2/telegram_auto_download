@@ -5,6 +5,8 @@ import threading
 import shutil
 import os
 
+from . import flood_gate
+
 logger = logging.getLogger(__name__)
 
 
@@ -14,6 +16,7 @@ class DownloadMonitor:
     def __init__(self, loop):
         self.loop = loop
         self.monitoring_active = False
+        self._stop_event = None
         self.current_download_dir = None
         self.download_stats = {
             'total_files': 0,
@@ -36,12 +39,19 @@ class DownloadMonitor:
         """啟動監控線程"""
         self.current_download_dir = download_dir
         self.monitoring_active = True
-        
+        # Each run has its own stop flag (v3.9.1): with one shared flag, a download starting less than a second
+        # after the previous one ended switched it back on before the old thread saw it off, and the old
+        # thread kept editing its old message every 5 s alongside the new one (more Bot API calls than needed).
+        if self._stop_event is not None:
+            self._stop_event.set()
+        stop = self._stop_event = threading.Event()
+        last_text = [None]
+
         def monitor_downloads():
             """監控下載進度和磁碟空間"""
             last_update = time.time()
-            
-            while self.monitoring_active:
+
+            while not stop.is_set():
                 try:
                     current_time = time.time()
                     
@@ -75,11 +85,14 @@ class DownloadMonitor:
                                 f"剩餘空間: {free_gb:.1f}GB"
                             )
                             
-                            # 異步更新消息
-                            asyncio.run_coroutine_threadsafe(
-                                self.safe_update_message(processing_msg, status_msg),
-                                self.loop
-                            )
+                            # 異步更新消息（內容沒變或 Telegram 限流中就不送）
+                            if status_msg != last_text[0] and not flood_gate.blocked_for(
+                                    getattr(processing_msg, 'chat_id', None)):
+                                last_text[0] = status_msg
+                                asyncio.run_coroutine_threadsafe(
+                                    self.safe_update_message(processing_msg, status_msg),
+                                    self.loop
+                                )
                             
                             # 記錄詳細日誌
                             logger.info(
@@ -91,11 +104,11 @@ class DownloadMonitor:
                             
                             last_update = current_time
                     
-                    time.sleep(1)  # 每秒檢查一次
-                    
+                    stop.wait(1)  # 每秒檢查一次
+
                 except Exception as e:
                     logger.error(f"監控線程錯誤: {e}")
-                    time.sleep(5)
+                    stop.wait(5)
         
         # 在後台線程中運行監控
         monitor_thread = threading.Thread(target=monitor_downloads, daemon=True)
@@ -113,6 +126,8 @@ class DownloadMonitor:
     def stop_monitoring(self):
         """停止監控線程"""
         self.monitoring_active = False
+        if self._stop_event is not None:
+            self._stop_event.set()
         logger.info("監控線程已停止")
     
     def get_disk_usage(self, path):

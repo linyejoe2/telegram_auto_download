@@ -42,6 +42,7 @@ class MediaItem:
     url: str
     kind: str       # photo / video / animated_gif
     ext: str
+    text: str = ''  # the tweet's text (gallery-dl `content`), stored as the file's 描述 (v3.10.0)
 
 
 @dataclass
@@ -83,6 +84,7 @@ class XProfileDownloader:
         # Run gallery-dl in-process: in the frozen exe sys.executable is the app itself,
         # so spawning "python -m gallery_dl" is not possible.
         from gallery_dl import config, job
+        from web import post_text
 
         config.clear()
         config.set(('extractor', 'twitter'), 'text-tweets', True)
@@ -107,6 +109,7 @@ class XProfileDownloader:
                 scan.items.append(MediaItem(
                     tweet_id=tid, num=meta.get('num', 1), url=msg[1],
                     kind=meta.get('type', 'photo'), ext=meta.get('extension', 'jpg'),
+                    text=post_text.clean(meta.get('content')),
                 ))
         scan.total_posts = len(seen_posts)
         scan.media_post_ids = sorted(media_posts)
@@ -230,6 +233,7 @@ class XProfileDownloader:
                 file_size=os.path.getsize(path),
                 file_type='photo' if item.kind == 'photo' else 'video',
                 mime_type='image/jpeg' if item.kind == 'photo' else 'video/mp4',
+                description=item.text,
             )
             counts['ok'] += 1
             now = time.time()

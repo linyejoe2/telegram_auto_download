@@ -1,5 +1,18 @@
 # ChangeLog
 
+## [3.10.0] - 2026-11-27 - Descriptions for X / Pornhub / YouTube
+### Added
+- X, Pornhub and YouTube downloads and X account downloads now store the post text as the file's 描述 (like Telegram downloads since v3.4.0): X = the tweet text (trailing t.co links dropped), YouTube = the video description, Pornhub = the video title (yt-dlp gives no description), X account = each tweet's text for all its photos / videos; new `web/post_text.py` `from_info()` / `clean()`
+### Changed
+- `x_downloader.py` / `p_downloader.py` / `youtube_downloader.py` use `ydl.extract_info(url, download=True)` to keep yt-dlp's info; a description already in the sidecar (typed in the web library, kept after a deletion) is not overwritten, files downloaded before 3.10.0 have none; `telegram_bot.spec` hiddenimport `web.post_text`
+
+## [3.9.1] - 2026-11-27 - Telegram Flood Control
+### Added
+- `src/flood_gate.py` `FloodGate` (Bot API rate limiter): after "Flood control exceeded" (`RetryAfter`) sends / edits to that chat fail at once until the wait is over, so retries no longer lengthen it
+### Fixed
+- A flood wait no longer drops queue items as 「任務失敗」, aborts the startup scan or a download (status edits), or raises handler tracebacks: the item is shown again after the wait, 下載完成 is sent after it, and an automatic rescan queues forwards / YouTube / X links sent meanwhile (t.me links must be sent again) (`bot.py`)
+- Two downloads started within a second left the old progress thread editing its message every 5 s; each run now has its own stop event and unchanged / rate-limited edits are skipped (`monitor.py`)
+
 ## [3.9.0] - 2026-11-26 - Download Tags & Whole t.me Posts
 ### Added
 - Bot asks for 主演 / 系列 after 「✅ 確認這裡」: answer with one message (line 1 主演 separated by `,` `，` `、` `/` `;` `&`, line 2 系列 optional, 「-」 = empty, labelled `主演：` / `系列：` lines also work), tap one of the 3 latest 🕐 combinations (`tag_history` in `history.json`, max 5 per user), ⏭ 跳過 or ❌ 取消; no answer in 10 min (`TAG_TIMEOUT`) downloads without tags (`bot.py` `_ask_tags_then()` / `_answer_tags()` / `_handle_tag_callback()`, `FolderNavigator.get_tag_history()` / `remember_tags()`)

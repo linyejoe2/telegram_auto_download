@@ -94,6 +94,7 @@ class XDownloader:
         import yt_dlp
         from src.phasher import get_video_phash_from_path
         from src.records import DownloadRecords
+        from web import post_text
 
         os.makedirs(dest_dir, exist_ok=True)
 
@@ -135,11 +136,12 @@ class XDownloader:
         }
 
         error: list = [None]
+        info: list = [None]   # yt-dlp's info dict: its description becomes the file's 描述 (v3.10.0)
 
         def _do_download():
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([url])
+                    info[0] = ydl.extract_info(url, download=True)
             except Exception as e:
                 error[0] = e
 
@@ -201,6 +203,7 @@ class XDownloader:
             file_size=file_size,
             file_type='video',
             mime_type='video/mp4',
+            description=post_text.from_info(info[0]),
         )
 
         await processing_msg.edit_text(
